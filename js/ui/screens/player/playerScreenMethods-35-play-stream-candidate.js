@@ -44,7 +44,7 @@ export function createPlayerScreenMethods35() {
               (entry.episode ?? null) === (this.params?.episode ?? null)
           );
           const resume = newerServerResume(result.stream.serverUserState, saved, this.params?.startFromBeginning);
-          if (resume && !options.preservePlaybackState) {
+          if (resume && !options.preservePlaybackState && !this.params?.handoffRequestId) {
             this.pendingPlaybackRestore = { timeSeconds: resume.positionMs / 1000, paused: false, attempts: 0, lastAttemptAt: 0 };
             options = { ...options, preservePendingRestore: true };
           }

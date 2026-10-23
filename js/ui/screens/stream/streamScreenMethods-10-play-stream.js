@@ -1,3 +1,4 @@
+import { handoffResumeParameters } from "../../../core/handoff/tvHandoffProtocol.js";
 import { activeStreamLinkProfile } from "../../../data/local/streamLinkCacheStore.js";
 /* eslint-disable no-unused-vars */
 import * as internals from "./streamScreen.js";
@@ -31,17 +32,18 @@ export function createStreamScreenMethods10() {
       const itemType = normalizeType(this.params?.itemType);
       const playerEpisodes =
         itemType === "series" || itemType === "tv" ? (Array.isArray(this.params?.episodes) ? this.params.episodes : null) : [];
-      const startFromBeginning = Boolean(this.params?.startFromBeginning);
+      const handoffResume = handoffResumeParameters(this.params);
+      const startFromBeginning = handoffResume ? handoffResume.startFromBeginning : Boolean(this.params?.startFromBeginning);
       const routeResumeProgress = {
         positionMs: Number(this.params?.resumePositionMs || 0) || 0,
         progressPercent: this.params?.resumeProgressPercent,
         durationMs: Number(this.params?.resumeDurationMs || 0) || 0
       };
-      const hasRouteResume = !startFromBeginning && isWatchProgressInProgress(routeResumeProgress);
+      const hasRouteResume = Boolean(handoffResume) || (!startFromBeginning && isWatchProgressInProgress(routeResumeProgress));
       let resumePositionMs = hasRouteResume ? routeResumeProgress.positionMs : 0;
       let resumeProgressPercent = hasRouteResume ? routeResumeProgress.progressPercent : null;
       let resumeDurationMs = hasRouteResume ? routeResumeProgress.durationMs : 0;
-      if (!startFromBeginning && resumePositionMs <= 0 && !(Number(resumeProgressPercent) > 0)) {
+      if (!handoffResume && !startFromBeginning && resumePositionMs <= 0 && !(Number(resumeProgressPercent) > 0)) {
         const resumeTarget =
           itemType === "series" || itemType === "tv"
             ? {
@@ -74,6 +76,7 @@ export function createStreamScreenMethods10() {
           this.params?.original_language ||
           null,
         videoId: this.params?.videoId || null,
+        ...(handoffResume || {}),
         resumePositionMs,
         resumeProgressPercent,
         resumeDurationMs,
