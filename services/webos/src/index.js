@@ -31,6 +31,7 @@ function createService() {
 }
 
 var service = createService();
+require("./handoff").register(service);
 
 var runtimeState = {
   booted: false,

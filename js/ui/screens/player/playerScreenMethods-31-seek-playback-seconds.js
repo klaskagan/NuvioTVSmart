@@ -31,7 +31,7 @@ export function createPlayerScreenMethods31() {
       if (typeof PlayerController.seekToSeconds === "function") {
         const didSeek = Boolean(
           PlayerController.seekToSeconds(seconds, {
-            exact: Boolean(this.isPartySynced?.()),
+            exact: Boolean(this.params?.handoffRequestId || this.isPartySynced?.()),
             paused: this.getPlaybackControlPaused?.() ?? Boolean(this.paused)
           })
         );
@@ -94,14 +94,17 @@ export function createPlayerScreenMethods31() {
         return;
       }
 
+      const handoff = Boolean(this.params?.handoffRequestId);
       const targetSeconds =
         Number.isFinite(durationSeconds) && durationSeconds > 0
-          ? Math.max(0, Math.min(requestedSeconds, Math.max(0, durationSeconds - 3)))
+          ? Math.max(0, Math.min(requestedSeconds, Math.max(0, durationSeconds - (handoff ? 0.1 : 3))))
           : requestedSeconds;
       const currentSeconds = this.getPlaybackCurrentSeconds();
-      const toleranceSeconds = Math.max(1.5, Math.min(8, targetSeconds * 0.03));
+      const toleranceSeconds = handoff ? 1.5 : Math.max(1.5, Math.min(8, targetSeconds * 0.03));
 
-      if (Number.isFinite(currentSeconds) && currentSeconds >= Math.max(0, targetSeconds - toleranceSeconds)) {
+      if (Number.isFinite(currentSeconds) && (handoff
+        ? Math.abs(currentSeconds - targetSeconds) <= toleranceSeconds
+        : currentSeconds >= Math.max(0, targetSeconds - toleranceSeconds))) {
         this.finalizePendingPlaybackRestore(restore);
         return;
       }

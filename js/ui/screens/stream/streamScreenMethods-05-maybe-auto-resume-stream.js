@@ -1,4 +1,5 @@
 import { expectedEpisodeFilename } from "../../../core/streams/filenameEpisodeMatcher.js";
+import { preferHandoffEdition } from "../../../core/handoff/tvHandoffProtocol.js";
 import { StreamLinkCacheStore, activeStreamLinkProfile } from "../../../data/local/streamLinkCacheStore.js";
 import { cachedStreamLinkCandidate } from "../../../core/streams/streamLinkReuse.js";
 /* eslint-disable no-unused-vars */
@@ -27,6 +28,7 @@ export function createStreamScreenMethods05() {
 
   return {
     tryResumeCachedStreamLink() {
+      if (this.params?.handoffRequestId) return false;
       const settings = PlayerSettingsStore.get();
       if (
         this.autoResumeAttempted ||
@@ -58,6 +60,7 @@ export function createStreamScreenMethods05() {
       return true;
     },
     maybeAutoResumeStream({ allLoaded = false } = {}) {
+      if (this.params?.handoffRequestId) return;
       if (this.autoResumeAttempted || this.params?.manualSelection) {
         return;
       }
@@ -129,7 +132,7 @@ export function createStreamScreenMethods05() {
         settings.streamAutoPlayPreferBingeGroupForNextEpisode && settings.streamAutoPlayReuseBingeGroup
           ? StreamPreferencesStore.getLatestForContent(this.params?.itemId)
           : null;
-      const preferredBingeGroup = String(savedPreference?.bingeGroup || "").trim();
+      const preferredBingeGroup = this.params?.handoffRequestId ? "" : String(savedPreference?.bingeGroup || "").trim();
       // Android may reuse a remembered group before the search timeout, including
       // MANUAL mode. An explicit manualSelection route above always wins.
       const autoPlayMode = String(settings.streamAutoPlayMode || "MANUAL").toUpperCase();
@@ -141,7 +144,7 @@ export function createStreamScreenMethods05() {
           .filter(Boolean)
       );
       const selected = selectAutoPlayStream(
-        this.getFilteredStreams().filter((stream) => !stream.partyShared),
+        preferHandoffEdition(this.getFilteredStreams().filter((stream) => !stream.partyShared), this.params?.handoffEditionHint),
         {
           mode: settings.streamAutoPlayMode,
           source: settings.streamAutoPlaySource,
