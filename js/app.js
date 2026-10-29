@@ -1,4 +1,5 @@
 import "./ui/components/serverWatchedNotice.js";
+import { installTvHandoffReceiver } from "./core/handoff/tvHandoffReceiver.js";
 import { MediaServerSyncService } from "./core/profile/mediaServerSyncService.js";
 import { installCustomPosterFallback } from "./core/poster/customPoster.js";
 import { installWebOsImgurImageFallback } from "./core/media/imageProxy.js";
@@ -694,6 +695,7 @@ async function bootstrapApp() {
   markBootStage("Checking authentication");
   await AuthManager.bootstrap();
   installPartyEffects();
+  installTvHandoffReceiver();
 }
 
 async function bootstrapAddonRemoteMode() {

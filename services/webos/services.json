@@ -105,6 +105,11 @@
           "name": "audioTranscodeStop",
           "description": "Stop a local audio conversion session",
           "public": true
+        },
+        {
+          "name": "handoffRequest",
+          "description": "Exchange bounded messages with a pinned local desktop handoff session",
+          "public": true
         }
       ]
     }
