@@ -1,6 +1,6 @@
 import { Platform } from "../../platform/index.js";
 import { TizenEngineFsService } from "../../platform/tizen/tizenEngineFsService.js";
-import { fetchMatroskaAudioTracks } from "./matroskaAudioMetadata.js";
+import { fetchMatroskaTracks } from "./matroskaTrackMetadata.js";
 import {
   isWebOsCompanionServiceAvailable,
   requestWebOsCompanionService
@@ -12,6 +12,7 @@ const TRACK_CACHE_TTL_MS = 30000;
 const WEBOS_EMPTY_TRACK_CACHE_TTL_MS = 5000;
 const WEBOS_LUNA_TRACK_ATTEMPTS = 6;
 const WEBOS_LUNA_TRACK_RETRY_DELAY_MS = 700;
+const TIZEN_TRACK_SERVICE_GRACE_MS = 2000;
 
 let cachedLocalMediaServerPort = LOCAL_MEDIA_SERVER_PORT_CANDIDATES[0];
 const tracksCache = new Map();
@@ -64,6 +65,72 @@ function delay(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, Math.max(0, Number(ms || 0)));
   });
+}
+
+function isAudioTrack(track) {
+  return (
+    String(track?.type || track?.track || "")
+      .trim()
+      .toLowerCase() === "audio"
+  );
+}
+
+function isSubtitleTrack(track) {
+  const type = String(track?.type || track?.track || "")
+    .trim()
+    .toLowerCase();
+  return type === "text" || type === "subtitle";
+}
+
+function appendHeaderSubtitles(tracks, headerTracks) {
+  if (tracks.some(isSubtitleTrack)) {
+    return tracks;
+  }
+  const headerSubtitles = (Array.isArray(headerTracks) ? headerTracks : []).filter(isSubtitleTrack);
+  return headerSubtitles.length ? tracks.concat(headerSubtitles) : tracks;
+}
+
+function hasKnownTrackLanguage(track) {
+  const language = String(track?.language || track?.lang || track?.track_lang || "")
+    .trim()
+    .toLowerCase();
+  return Boolean(language) && !["und", "unknown", "zxx"].includes(language.split("-")[0]);
+}
+
+// The local service can expose the container's audio streams without their
+// language tags. Fill only missing fields, and only when both lists agree on
+// the number of audio streams, so a mismatch can never relabel a track.
+function mergeTizenTrackMetadata(serviceTracks, headerTracks) {
+  const tracks = Array.isArray(serviceTracks) ? serviceTracks : [];
+  const serviceAudio = tracks.filter(isAudioTrack);
+  const headerAudio = (Array.isArray(headerTracks) ? headerTracks : []).filter(isAudioTrack);
+  if (!serviceAudio.length) {
+    return tracks.some(isSubtitleTrack)
+      ? tracks.concat(headerAudio)
+      : tracks.concat(headerTracks || []);
+  }
+  if (serviceAudio.length !== headerAudio.length) {
+    return appendHeaderSubtitles(tracks, headerTracks);
+  }
+  let audioIndex = 0;
+  const merged = tracks.map((track) => {
+    if (!isAudioTrack(track)) {
+      return track;
+    }
+    const headerTrack = headerAudio[audioIndex++];
+    const fillLanguage = !hasKnownTrackLanguage(track) && Boolean(headerTrack?.language);
+    const fillStreamIndex =
+      track?.containerStreamIndex == null && headerTrack?.containerStreamIndex != null;
+    if (!fillLanguage && !fillStreamIndex) {
+      return track;
+    }
+    return {
+      ...track,
+      ...(fillLanguage ? { language: headerTrack.language } : {}),
+      ...(fillStreamIndex ? { containerStreamIndex: headerTrack.containerStreamIndex } : {})
+    };
+  });
+  return appendHeaderSubtitles(merged, headerTracks);
 }
 
 async function requestTracksViaLuna(mediaUrl) {
@@ -163,19 +230,51 @@ export const localMediaTracksRepository = {
       }
 
       if (Platform.isTizen()) {
-        let tracks = [];
-        try {
-          const service = await TizenEngineFsService.ensureStarted();
-          const baseUrl = String(service?.baseUrl || "").replace(/\/+$/, "");
-          if (service?.status === "success" && baseUrl) {
-            const payload = await fetchJson(`${baseUrl}/tracks/${encodeURIComponent(targetUrl)}`);
-            tracks = Array.isArray(payload) ? payload : [];
-            rememberLocalMediaServerUrl(baseUrl);
+        // The packaged service may take far longer than playback startup to
+        // answer, so read the container header at the same time instead of
+        // serializing the two sources.
+        const headerPromise = fetchMatroskaTracks(targetUrl);
+        const servicePromise = (async () => {
+          try {
+            const service = await TizenEngineFsService.ensureStarted();
+            const baseUrl = String(service?.baseUrl || "").replace(/\/+$/, "");
+            if (service?.status === "success" && baseUrl) {
+              const payload = await fetchJson(`${baseUrl}/tracks/${encodeURIComponent(targetUrl)}`);
+              rememberLocalMediaServerUrl(baseUrl);
+              return Array.isArray(payload) ? payload : [];
+            }
+          } catch (_) {
+            // Older Tizen TVs may have AVPlay but no usable packaged web service.
           }
-        } catch (_) {
-          // Older Tizen TVs may have AVPlay but no usable packaged web service.
+          return [];
+        })();
+        const serviceTracks = await Promise.race([
+          servicePromise,
+          delay(TIZEN_TRACK_SERVICE_GRACE_MS).then(() => null)
+        ]);
+        const serviceAudio = (serviceTracks || []).filter(isAudioTrack);
+        const serviceHasLanguages =
+          serviceAudio.length > 0 && serviceAudio.every(hasKnownTrackLanguage);
+        let tracks;
+        if (serviceHasLanguages) {
+          tracks = serviceTracks.some(isSubtitleTrack)
+            ? serviceTracks
+            : mergeTizenTrackMetadata(serviceTracks, await headerPromise);
+        } else {
+          const headerTracks = await headerPromise;
+          if (!headerTracks.length && serviceTracks === null) {
+            const lateServiceTracks = await Promise.race([
+              servicePromise,
+              delay(TIZEN_TRACK_SERVICE_GRACE_MS).then(() => null)
+            ]);
+            tracks = Array.isArray(lateServiceTracks) ? lateServiceTracks : [];
+          } else {
+            tracks =
+              serviceTracks?.length > 0
+                ? mergeTizenTrackMetadata(serviceTracks, headerTracks)
+                : headerTracks;
+          }
         }
-        if (!tracks.length) tracks = await fetchMatroskaAudioTracks(targetUrl);
         tracksCache.set(targetUrl, {
           tracks,
           expiresAt: Date.now() + (tracks.length ? TRACK_CACHE_TTL_MS : 5000)

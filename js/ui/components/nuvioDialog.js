@@ -43,6 +43,8 @@
  *   dialog.destroy();              // animated exit then removes from DOM
  */
 
+import { focusWithoutScroll } from "../navigation/focusWithoutScroll.js";
+
 export class NuvioDialog {
   constructor({
     title,
@@ -55,6 +57,7 @@ export class NuvioDialog {
     actionsClassName = "",
     content = null,
     onVerticalNavigate = null,
+    onKey = null,
     suppressEnterUntilKeyUp = false
   }) {
     this.title = title;
@@ -67,6 +70,7 @@ export class NuvioDialog {
     this.actionsClassName = actionsClassName;
     this.content = content;
     this.onVerticalNavigate = onVerticalNavigate;
+    this.onKey = onKey;
     this.suppressEnterUntilKeyUp = Boolean(suppressEnterUntilKeyUp);
 
     this._focusedIndex = 0;
@@ -255,7 +259,7 @@ export class NuvioDialog {
     this._buttonEls.forEach((el, idx) => {
       el.classList.toggle("focused", idx === clamped);
     });
-    this._buttonEls[clamped]?.focus({ preventScroll: true });
+    focusWithoutScroll(this._buttonEls[clamped]);
   }
 
   _onKey(e) {
@@ -266,6 +270,12 @@ export class NuvioDialog {
       e.preventDefault();
       e.stopPropagation();
       this._dismiss();
+      return;
+    }
+
+    if (typeof this.onKey === "function" && this.onKey(key) === true) {
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
 

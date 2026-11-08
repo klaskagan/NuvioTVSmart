@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { build } from "esbuild";
+import { streamProviderHeader } from "../js/core/streams/streamOrdering.js";
 
 const files = [
   [
@@ -38,7 +39,7 @@ const files = [
   ],
   [
     "detail/metaDetailsScreenMethods-16-render-comments-section.js",
-    "createMetaDetailsScreenMethods16"
+    "createMetaDetailsScreenMethods16, commentReaderTextStyle, formatCommentTimestamp"
   ],
   [
     "stream/streamScreenMethods-07-restore-stream-virtual-scroll-position.js",
@@ -98,6 +99,7 @@ const fixtures = {
     return {};
   },
   LocalStore: { get: (_key, fallback) => fallback },
+  focusWithoutScroll: (node) => node?.focus?.(),
   normalizeDetailImdbRatingsVisibility: (value) => value,
   normalizeHomeImdbRatingsVisibility: (value) => value,
   t: (key, args = []) => key + (args.length ? ":" + args[0] : ""),
@@ -113,6 +115,7 @@ const fixtures = {
   StreamBadgeSettingsStore: { snapshot: () => ({}) },
   isPerformanceConstrainedRuntime: () => false,
   contentTextDirection: () => "ltr",
+  streamProviderHeader,
   ScreenUtils: { indexFocusables() {} }
 };
 const context = vm.createContext({ fixtures, console });
@@ -137,6 +140,48 @@ for (const webos of [false, true]) {
 fixtures.Environment.isWebOS = () => false;
 const streamCss = await readFile("css/components-50.css", "utf8");
 assert.match(streamCss, /\.stream-route-card-heading\s*\{[^}]*white-space:\s*pre-line;/);
+const streamBaseCss = await readFile("css/components-44.css", "utf8");
+const ruleBody = (css, selector) =>
+  css.match(
+    new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}")
+  )?.[1] || "";
+// Tizen 4 has no CSS grid, so its flex fallback must keep the Android TV
+// 40/60 split and the base 96px panel insets instead of reintroducing the
+// old fixed columns with their own padding.
+const tizenStream = ruleBody(streamCss, ".legacy-tizen .stream-route-content");
+assert.match(tizenStream, /display:\s*flex;/);
+assert.match(tizenStream, /padding:\s*0;/);
+assert.match(ruleBody(streamCss, ".legacy-tizen .stream-route-left"), /flex:\s*0 0 40%;/);
+assert.match(ruleBody(streamCss, ".legacy-tizen .stream-route-right"), /flex:\s*0 0 60%;/);
+assert.doesNotMatch(ruleBody(streamCss, ".legacy-tizen .stream-route-right"), /height:\s*\d+px/);
+assert.doesNotMatch(
+  ruleBody(streamCss, ".legacy-tizen .stream-route-panel-shell"),
+  /border-radius|padding:/
+);
+assert.match(streamBaseCss, /\.stream-route-right\s*\{[^}]*padding:\s*96px 96px 96px 0;/);
+assert.match(streamBaseCss, /\.stream-route-panel-shell\s*\{[^}]*border-radius:\s*32px;/);
+// Legacy webOS keeps the absolute layout needed by webOS 6 and older, but
+// must expose the same geometry and typography as the shared Android layout.
+assert.match(ruleBody(streamCss, ".legacy-webos .stream-route-content"), /padding:\s*0;/);
+const webOsLeft = ruleBody(streamCss, ".legacy-webos .stream-route-left");
+assert.match(webOsLeft, /left:\s*0;/);
+assert.match(webOsLeft, /width:\s*768px;/);
+assert.match(webOsLeft, /padding-inline:\s*96px 48px;/);
+const webOsRight = ruleBody(streamCss, ".legacy-webos .stream-route-right");
+assert.match(webOsRight, /left:\s*768px;/);
+assert.match(webOsRight, /top:\s*96px;/);
+assert.match(webOsRight, /right:\s*96px;/);
+assert.match(webOsRight, /bottom:\s*96px;/);
+assert.match(webOsRight, /padding:\s*0;/);
+assert.doesNotMatch(
+  ruleBody(streamCss, ".legacy-webos .stream-route-panel-shell"),
+  /border-radius|padding:/
+);
+assert.doesNotMatch(ruleBody(streamCss, ".legacy-webos .stream-route-list"), /padding:/);
+assert.doesNotMatch(
+  streamCss,
+  /\.legacy-webos \.stream-route-(?:chip|chip-track|chip-wrap|resume-label|card-row|card-heading|card-quality|card-line|card-side|badges|stream-badge|addon-badge|addon-name|left-inner|logo|panel-header)\s*\{/
+);
 assert.equal(normalizeLayout({ posterCardCornerRadiusDp: 0 }).posterCardCornerRadiusDp, 0);
 assert.equal(normalizeLayout({ posterCardCornerRadiusDp: "bad" }).posterCardCornerRadiusDp, 12);
 assert.equal(normalizeLayout({ posterCardCornerRadiusDp: null }).posterCardCornerRadiusDp, 12);
@@ -195,7 +240,7 @@ assert.equal(
 );
 const virtualGap = api.createStreamScreenMethods01().getStreamVirtualRowGap;
 assert.equal(virtualGap.call({ isLegacyWebOsRoute: () => false }), 40);
-assert.equal(virtualGap.call({ isLegacyWebOsRoute: () => true }), 10);
+assert.equal(virtualGap.call({ isLegacyWebOsRoute: () => true }), 40);
 
 const header = api.createStreamScreenMethods07().getHeaderMeta;
 for (const [runtime, expected] of [
@@ -418,6 +463,20 @@ assert.equal(more.hidden, false);
 preview.scrollHeight = 384;
 api.createMetaDetailsScreenMethods16().bindDetailChrome.call(chrome);
 assert.equal(isFocusable, false);
+
+for (const [length, fontSize, lineHeight] of [
+  [160, 80, 96],
+  [161, 60, 76],
+  [901, 32, 42]
+]) {
+  const style = api.commentReaderTextStyle(length);
+  assert.equal(style.fontSize, fontSize);
+  assert.equal(style.lineHeight, lineHeight);
+}
+assert.equal(api.formatCommentTimestamp("2026-11-05T16:14:26Z", null, "en-US"), "Nov 5, 2026");
+assert.equal(api.formatCommentTimestamp("", "2026-11-05T16:14:26Z", "en-US"), "Nov 5, 2026");
+assert.equal(api.formatCommentTimestamp("not-a-date", null, "en-US"), "");
+assert.equal(api.formatCommentTimestamp("", "", "en-US"), "");
 assert.equal(more.hidden, true);
 
 let dialogConfig,

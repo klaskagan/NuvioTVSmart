@@ -1,5 +1,7 @@
 import { isAmbientTrailerPlaying } from "./ambientPlaybackPolicy.js";
+import { focusWithoutScroll } from "../navigation/focusWithoutScroll.js";
 import { WebOSPlayerExtensions } from "../../platform/webos/webosPlayerExtensions.js";
+import { TizenScreenSaver } from "../../platform/tizen/tizenScreenSaver.js";
 import { Platform } from "../../platform/index.js";
 import { AmbientModeStore } from "../../data/local/ambientModeStore.js";
 import { ProfileManager } from "../../core/profile/profileManager.js";
@@ -26,6 +28,19 @@ const BLOCKED_ROUTES = new Set([
   "serverConnection"
 ]);
 const now = () => globalThis.performance?.now?.() ?? Date.now();
+let lastImageFailure = "";
+function logImageFailure(url, reason) {
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch (_) {
+    /* Keep the reason when the URL is not parseable. */
+  }
+  const key = `${reason}:${host}`;
+  if (key === lastImageFailure) return;
+  lastImageFailure = key;
+  console.warn("Ambient image failed", { reason, host });
+}
 function shuffled(values) {
   const copy = [...values];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -38,22 +53,41 @@ function loadImage(url, signal) {
   return new Promise((resolve) => {
     if (!url || signal.aborted) return resolve(null);
     const image = new Image();
+    // Some Tizen engines only complete an image load once it is in the
+    // document. Keep it invisible until it is moved into the slide.
+    image.setAttribute(
+      "style",
+      "position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none"
+    );
+    document.body?.appendChild(image);
     let timer;
     const finish = (result) => {
       clearTimeout(timer);
       signal.removeEventListener("abort", cancel);
       image.onload = null;
       image.onerror = null;
+      image.removeAttribute("style");
+      image.remove?.();
       resolve(result);
     };
     const cancel = () => {
+      image.onload = null;
+      image.onerror = null;
       image.src = "";
       finish(null);
     };
-    image.onload = () => finish(image.naturalWidth > 0 ? image : null);
-    image.onerror = () => finish(null);
+    // onload already proves the image is usable. Some TV engines report
+    // naturalWidth as 0 until the image is attached, which left Ambient black.
+    image.onload = () => finish(image);
+    image.onerror = () => {
+      logImageFailure(url, "error");
+      finish(null);
+    };
     signal.addEventListener("abort", cancel, { once: true });
-    timer = setTimeout(cancel, 10000);
+    timer = setTimeout(() => {
+      logImageFailure(url, "timeout");
+      cancel();
+    }, 10000);
     image.src = url;
   });
 }
@@ -93,9 +127,16 @@ export const AmbientMode = {
       true
     );
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) this.dismiss();
+      if (document.hidden) {
+        this.dismiss();
+        this.setTizenScreenSaverBlocked(false);
+      }
       this.lastInteraction = now();
     });
+    if (Platform.isTizen())
+      document.addEventListener("nuvio:beforeExitApp", () =>
+        this.setTizenScreenSaverBlocked(false)
+      );
     this.interval = setInterval(() => this.tick(), 1000);
     this.tick();
   },
@@ -111,6 +152,11 @@ export const AmbientMode = {
     }
     this.swallowedKey = null;
   },
+  setTizenScreenSaverBlocked(blocked) {
+    if (!Platform.isTizen()) return;
+    if (blocked) TizenScreenSaver.block();
+    else TizenScreenSaver.unblock();
+  },
   allowed(settings) {
     const route = Router.getCurrent();
     return (
@@ -123,6 +169,18 @@ export const AmbientMode = {
   },
   tick() {
     const route = Router.getCurrent();
+    if (BLOCKED_ROUTES.has(route)) {
+      // Playback and sign-in routes never show Ambient Mode. Skip the settings
+      // read and JSON signature there: one storage parse per second for the
+      // whole film competed with AVPlay and key handling (issue #1208). A
+      // settings or profile change made on such a route is picked up by the
+      // first tick after leaving it.
+      this.lastInteraction = now();
+      this.idleRoute = route;
+      this.setTizenScreenSaverBlocked(false);
+      if (this.showing) this.dismiss();
+      return;
+    }
     const trailerPlaying = isAmbientTrailerPlaying(Router.getCurrentScreen?.());
     if (route !== this.idleRoute || trailerPlaying || this.trailerPlaying !== trailerPlaying) {
       // A completed/paused trailer starts a fresh idle period, as on Android.
@@ -147,9 +205,11 @@ export const AmbientMode = {
         }, 20000);
     }
     if (!this.allowed(settings)) {
+      this.setTizenScreenSaverBlocked(false);
       if (this.showing) this.dismiss();
       return;
     }
+    this.setTizenScreenSaverBlocked(true);
     if (!this.showing && now() - this.lastInteraction >= settings.timeoutMinutes * 60000)
       this.show();
   },
@@ -172,11 +232,13 @@ export const AmbientMode = {
         controller?.signal.aborted
       )
         return;
+      if (!slides.length) console.warn("Ambient catalog load returned no slides");
       if (slides.length || this.loadedSignature !== signature) this.slides = shuffled(slides);
       this.loadedSignature = signature;
       this.loadedAt = now();
-    } catch (_) {
+    } catch (error) {
       /* Keep the last successful selection on transient failure. */
+      console.warn("Ambient catalog load failed", error);
     } finally {
       if (this.generation === generation && this.controller === controller)
         this.loadingSignature = null;
@@ -276,6 +338,14 @@ export const AmbientMode = {
     stage.appendChild(copy);
     this.root.textContent = "";
     this.root.appendChild(stage);
+    clearTimeout(this.paintTimer);
+    this.paintTimer = setTimeout(() => {
+      this.paintTimer = 0;
+      if (signal.aborted || !this.showing || !stage.isConnected) return;
+      const opacity = globalThis.getComputedStyle?.(backdrop)?.opacity;
+      if (Number(opacity) !== 0) return;
+      stage.classList.add("ambient-static");
+    }, 500);
     this.slideTimer = setTimeout(() => {
       void this.nextSlide(signal);
     }, 13250);
@@ -291,6 +361,8 @@ export const AmbientMode = {
       this.slideSignal = null;
     }
     clearTimeout(this.slideTimer);
+    clearTimeout(this.paintTimer);
+    this.paintTimer = 0;
     this.root?.remove();
     this.root = null;
     const canRestoreFocus =
@@ -302,11 +374,7 @@ export const AmbientMode = {
       this.previousFocus !== document.body &&
       this.previousFocus !== document.documentElement
     ) {
-      try {
-        this.previousFocus.focus({ preventScroll: true });
-      } catch (_) {
-        this.previousFocus.focus();
-      }
+      focusWithoutScroll(this.previousFocus);
     } else if (canRestoreFocus) {
       this.previousScreen?.applyFocus?.();
     }

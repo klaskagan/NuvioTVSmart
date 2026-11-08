@@ -1,5 +1,7 @@
 /* eslint-disable no-unused-vars */
 import * as internals from "./settingsScreenContext.js";
+import { AUTO_SYNC_TOLERANCE_OPTIONS_MS } from "../../../core/player/subtitleAutoSyncEngine.js";
+import { normalizeHdrBrightness } from "../../../core/player/hdrSubtitleStyle.js";
 
 export function registerPlaybackActionsPart02(model) {
   const {
@@ -15,6 +17,7 @@ export function registerPlaybackActionsPart02(model) {
     SUBTITLE_TEXT_COLOR_OPTIONS,
     SUBTITLE_TEXT_OPACITY_OPTIONS,
     SUBTITLE_OUTLINE_COLOR_OPTIONS,
+    SUBTITLE_HDR_BRIGHTNESS_OPTIONS,
     normalizeSubtitleStyleHex,
     clampSubtitleSize,
     clampSubtitleTextOpacity,
@@ -63,6 +66,32 @@ export function registerPlaybackActionsPart02(model) {
         ...currentSettings.subtitleStyle,
         showOnlyPreferredLanguages: enabled
       }
+    });
+  });
+  this.actionMap.set("playback:subtitleAutoSync", () => {
+    const currentSettings = PlayerSettingsStore.get();
+    updateSubtitleStyle({
+      autoSyncEnabled: !currentSettings.subtitleStyle?.autoSyncEnabled
+    });
+  });
+  this.actionMap.set("playback:subtitleAutoSyncTolerance", () => {
+    const current = Math.trunc(Number(PlayerSettingsStore.get().subtitleStyle?.autoSyncToleranceMs || 0));
+    this.openOptionDialog({
+      title: t("autosync_tolerance_title", {}, "Auto Sync Tolerance"),
+      options: AUTO_SYNC_TOLERANCE_OPTIONS_MS.map((value) => ({
+        id: String(value),
+        label: value > 0 ? t("autosync_tolerance_value", [value], `${value} ms`) : t("autosync_tolerance_off", {}, "Off")
+      })),
+      selectedId: String(current),
+      returnFocusKey: "playback:subtitleAutoSyncTolerance",
+      onSelect: (option) => {
+        updateSubtitleStyle({ autoSyncToleranceMs: Math.trunc(Number(option.id)) || 0 });
+      }
+    });
+  });
+  this.actionMap.set("playback:subtitleAutoSyncThorough", () => {
+    updateSubtitleStyle({
+      autoSyncThorough: PlayerSettingsStore.get().subtitleStyle?.autoSyncThorough === false
     });
   });
   this.actionMap.set("playback:subtitleLanguage", () => {
@@ -207,6 +236,38 @@ export function registerPlaybackActionsPart02(model) {
       onSelect: (option) => {
         updateSubtitleStyle({ outlineColor: normalizeSubtitleStyleHex(option.id, "#000000") });
       }
+    });
+  });
+  this.actionMap.set("playback:subtitleHdrStyle", () => {
+    updateSubtitleStyle({
+      hdrStyleEnabled: PlayerSettingsStore.get().subtitleStyle?.hdrStyleEnabled !== true
+    });
+  });
+  this.actionMap.set("playback:subtitleHdrTextColor", () => {
+    this.openOptionDialog({
+      title: t("sub_hdr_text_color", {}, "HDR Text Color"),
+      options: SUBTITLE_TEXT_COLOR_OPTIONS,
+      selectedId: normalizeSubtitleStyleHex(PlayerSettingsStore.get().subtitleStyle?.hdrTextColor, "#FFFFFF"),
+      returnFocusKey: "playback:subtitleHdrTextColor",
+      onSelect: (option) => {
+        updateSubtitleStyle({ hdrTextColor: normalizeSubtitleStyleHex(option.id, "#FFFFFF") });
+      }
+    });
+  });
+  this.actionMap.set("playback:subtitleHdrBrightness", () => {
+    this.openOptionDialog({
+      title: t("sub_hdr_brightness", {}, "HDR Brightness"),
+      options: SUBTITLE_HDR_BRIGHTNESS_OPTIONS,
+      selectedId: normalizeHdrBrightness(PlayerSettingsStore.get().subtitleStyle?.hdrBrightness),
+      returnFocusKey: "playback:subtitleHdrBrightness",
+      onSelect: (option) => {
+        updateSubtitleStyle({ hdrBrightness: normalizeHdrBrightness(option.id) });
+      }
+    });
+  });
+  this.actionMap.set("playback:subtitleHdrDimPlayerControls", () => {
+    updateSubtitleStyle({
+      hdrDimPlayerControls: PlayerSettingsStore.get().subtitleStyle?.hdrDimPlayerControls !== true
     });
   });
   this.actionMap.set("playback:p2pEnabled", () => {

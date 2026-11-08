@@ -28,7 +28,7 @@ function setup({ platform = "browser", constrained = false, legacyTizen = false 
     ["homeScreenMethods-17-end-modern-vertical-fast-scroll.js", "createHomeScreenMethods17"]
   ]) {
     const source = readFileSync(new URL(`../js/ui/screens/home/${file}`, import.meta.url), "utf8")
-      .replace(/^import .*;\n/m, "")
+      .replace(/^import .*;\r?\n/m, "")
       .replace("export function", "function");
     Object.assign(screen, vm.runInContext(`${source}\n${factory}()`, context));
   }
@@ -37,15 +37,10 @@ function setup({ platform = "browser", constrained = false, legacyTizen = false 
 
 for (const options of [
   { constrained: true },
-  { platform: "tizen", legacyTizen: true },
-  { platform: "webos" }
+  { platform: "tizen", constrained: true, legacyTizen: true }
 ]) {
   test(`Home immediate policy cancels both cameras and clamps both axes: ${JSON.stringify(options)}`, () => {
     const { screen, frames, context } = setup(options);
-    if (options.platform === "webos") {
-      assert.equal(Boolean(screen.shouldUseImmediateFocusScroll()), false);
-      assert.equal(screen.shouldUseImmediateCameraScroll(), true);
-    }
     const container = {
       scrollWidth: 500,
       clientWidth: 100,
@@ -85,9 +80,16 @@ for (const options of [
   });
 }
 
-for (const platform of ["tizen", "browser"]) {
-  test(`Home retains animated scrolling and held navigation on normal ${platform}`, () => {
-    const { screen, frames } = setup({ platform });
+for (const options of [
+  { platform: "webos" },
+  { platform: "tizen" },
+  // Every Samsung set carries legacy-tizen as a layout fallback; only the
+  // constrained runtime profile may snap the camera.
+  { platform: "tizen", legacyTizen: true },
+  { platform: "browser" }
+]) {
+  test(`Home retains animated scrolling and held navigation on normal ${JSON.stringify(options)}`, () => {
+    const { screen, frames } = setup(options);
     const container = {
       scrollWidth: 500,
       clientWidth: 100,
@@ -96,7 +98,7 @@ for (const platform of ["tizen", "browser"]) {
       scrollLeft: 0,
       scrollTop: 0
     };
-    assert.equal(Boolean(screen.shouldUseImmediateCameraScroll()), false);
+    assert.equal(Boolean(screen.shouldUseImmediateFocusScroll()), false);
     for (const method of ["animateScroll", "animateSpringScroll"]) {
       screen[method](container, "x", 200);
       assert.equal(container.scrollLeft, 0);

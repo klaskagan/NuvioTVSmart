@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { isLivePlayback, LivePlaybackWatchClock } from "../js/ui/screens/player/livePlaybackUi.js";
+import vm from "node:vm";
+import {
+  LiveDurationGrowth,
+  isLivePlayback,
+  nextLiveDurationGrowth,
+  LivePlaybackWatchClock
+} from "../js/ui/screens/player/livePlaybackUi.js";
 
 test("Android live policy: channel or runtime evidence, never URL, tv, stream or unknown duration", () => {
   for (const itemType of ["movie", "series", "tv", "stream", "live", ""]) {
@@ -289,6 +296,102 @@ test("More opens the first supported extra action and closes onto Play/Pause", (
   }
 });
 
+const { createPlayerScreenMethods36 } =
+  await import("../js/ui/screens/player/playerScreenMethods-36-reset-playback-engine-validation.js");
+test("HTTP 416 retries the current source from the start once, clearing resume", () => {
+  const previousEngine = PlayerController.playbackEngine;
+  PlayerController.playbackEngine = "hls.js";
+  const calls = [];
+  const source = { id: "src", url: "https://live.example/master.m3u8" };
+  const s = {
+    ...createPlayerScreenMethods36(),
+    activePlaybackUrl: source.url,
+    hasRetriedCurrentStreamAfter416: false,
+    pendingPlaybackRestore: { timeSeconds: 1800 },
+    lastPlaybackErrorAt: Date.now(),
+    loadingVisible: false,
+    paused: true,
+    sourcesError: "old",
+    updateLoadingVisibility() {},
+    getStreamCandidateByUrl: (url) => (url === source.url ? source : null),
+    getCurrentStreamCandidate: () => source,
+    playStreamByUrl(url, options) {
+      calls.push({ url, options });
+    }
+  };
+  try {
+    assert.equal(s.retryCurrentStreamFromStartAfter416(), true);
+    assert.equal(
+      s.pendingPlaybackRestore,
+      null,
+      "the stale resume position must not survive the restart"
+    );
+    assert.equal(s.hasRetriedCurrentStreamAfter416, true);
+    assert.equal(s.loadingVisible, true);
+    assert.equal(s.lastPlaybackErrorAt, 0);
+    assert.deepEqual(
+      calls.map((call) => call.url),
+      [source.url]
+    );
+    assert.equal(calls[0].options.forceEngine, "hls.js");
+    assert.equal(calls[0].options.preservePendingRestore, undefined);
+    assert.equal(calls[0].options.preservePlaybackState, undefined);
+    assert.equal(
+      s.retryCurrentStreamFromStartAfter416(),
+      false,
+      "only one full-restart retry is allowed"
+    );
+    assert.equal(calls.length, 1);
+  } finally {
+    PlayerController.playbackEngine = previousEngine;
+  }
+});
+
+async function loadVideoErrorHandlers(internals) {
+  const source = await readFile(
+    new URL("../js/ui/screens/player/playerVideoEventHandlers.js", import.meta.url),
+    "utf8"
+  );
+  const context = vm.createContext({ internals, console });
+  vm.runInContext(
+    source.replace(/^import .*$/gm, "").replace(/^export /gm, "") +
+      "\nthis.createVideoEventHandlers = createPlayerVideoEventHandlers;",
+    context
+  );
+  return context.createVideoEventHandlers;
+}
+
+test("HTTP 416 reaches the one-shot restart before any engine failover", async () => {
+  const retries = [];
+  const createVideoEventHandlers = await loadVideoErrorHandlers({
+    PlayerController: { getLastHlsErrorDiagnostic: () => ({ fatal: true, responseCode: 416 }) },
+    isExpiredStreamUrl: () => false,
+    isTerminalHlsHttpStatus: () => false,
+    logEngineFsDebug() {},
+    claimEngineFsPlayback() {}
+  });
+  const screen = {
+    isStartupErrorVisible: () => false,
+    getPlaybackEventErrorDetail: () => "HTTP 416",
+    getStreamCandidateByUrl: () => ({}),
+    getCurrentStreamCandidate: () => ({}),
+    tryServerPlaybackFallback: () => false,
+    activePlaybackUrl: "https://live.example/master.m3u8",
+    currentEngineFsStream: null,
+    hasPresentedPlaybackFrame: false,
+    retryCurrentStreamFromStartAfter416() {
+      retries.push("416");
+      return true;
+    }
+  };
+  const { onError } = createVideoEventHandlers.call(screen, {}, false);
+
+  // The native video error event can arrive without a detail payload; the
+  // cached hls.js diagnostic still identifies the 416.
+  await onError({ detail: { mediaErrorCode: 2 } });
+  assert.deepEqual(retries, ["416"]);
+});
+
 const { createPlayerScreenMethods15 } =
   await import("../js/ui/screens/player/playerScreenMethods-15-apply-manifest-track-selection.js");
 test("initial live markup never flashes a VOD bar, end time or removed source line", () => {
@@ -357,4 +460,109 @@ test("AVPlay live signal accepts native 1/0 and skips unavailable or busy native
       false
     );
   }
+});
+
+test("Android live progress guard: growing native duration marks live and live playback never saves resume", async () => {
+  assert.equal(nextLiveDurationGrowth(new LiveDurationGrowth(), "a", 1_320_000, true).grew, false);
+  const growing = nextLiveDurationGrowth(new LiveDurationGrowth(), "a", 8_000, true);
+  nextLiveDurationGrowth(growing, "a", 18_000, true);
+  nextLiveDurationGrowth(growing, "a", 32_000, true);
+  assert.equal(growing.grew, true, "a live duration that grows past 10s is live");
+
+  const skippedReadings = nextLiveDurationGrowth(new LiveDurationGrowth(), "a", 1_200_000, false);
+  nextLiveDurationGrowth(skippedReadings, "a", 2_700_000, true);
+  assert.equal(skippedReadings.grew, false, "readings from the previous media are ignored");
+  assert.equal(
+    nextLiveDurationGrowth(growing, "b", 2_700_000, true).grew,
+    false,
+    "a new media resets the growth"
+  );
+
+  globalThis.localStorage ??= { getItem: () => null, setItem() {}, removeItem() {} };
+  const { createPlayerControllerMethods20 } =
+    await import("../js/core/player/playerControllerMethods-20-flush-progress.js");
+  const { createPlayerControllerMethods17 } =
+    await import("../js/core/player/playerControllerMethods-17-save-progress-if-needed.js");
+  const { createPlayerControllerMethods19 } =
+    await import("../js/core/player/playerControllerMethods-19-pause.js");
+  assert.equal(
+    await createPlayerControllerMethods20().flushProgress.call(
+      { currentPlaybackIsLive: true },
+      10_000,
+      20_000
+    ),
+    false
+  );
+  assert.equal(
+    createPlayerControllerMethods17().saveProgressIfNeeded.call({
+      currentPlaybackIsLive: true,
+      playbackSessionActive: true,
+      isPlaying: true
+    }),
+    false
+  );
+  assert.equal(
+    await createPlayerControllerMethods19().flushCurrentProgress.call({
+      currentPlaybackIsLive: true
+    }),
+    false
+  );
+});
+
+async function loadManifestTrackMethods(playerController, fetchStub) {
+  const source = await readFile(
+    new URL(
+      "../js/ui/screens/player/playerScreenMethods-14-load-manifest-track-data-for-current-stream.js",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const context = vm.createContext({
+    internals: {
+      PlayerController: playerController,
+      Environment: { isWebOS: () => false },
+      uniqueNonEmptyValues: (values) => [...new Set((values || []).filter(Boolean))]
+    },
+    AbortController,
+    fetch: fetchStub,
+    console
+  });
+  vm.runInContext(
+    source.replace(/^import .*$/gm, "").replace(/^export /gm, "") +
+      "\nthis.methods = createPlayerScreenMethods14();",
+    context
+  );
+  return context.methods;
+}
+
+test("adaptive engine owns the manifest: the track probe does not issue a second request", async () => {
+  let fetchCount = 0;
+  const methods = await loadManifestTrackMethods({ hlsInstance: {}, video: null }, () => {
+    fetchCount += 1;
+    throw new Error("the probe must not run while hls.js owns the manifest");
+  });
+  const screen = {
+    activePlaybackUrl: "https://live.example/master.m3u8",
+    manifestAudioTracks: ["stale"],
+    manifestSubtitleTracks: [],
+    manifestVariants: [],
+    manifestLoadToken: 0,
+    manifestLoading: false,
+    getCurrentStreamCandidate: () => ({ url: "https://live.example/master.m3u8" }),
+    getCurrentStreamRequestHeaders: () => ({}),
+    refreshTrackDialogs() {},
+    parseManifestTracks: () => ({ audioTracks: [], subtitleTracks: [], variants: [] })
+  };
+  await methods.loadManifestTrackDataForCurrentStream.call(screen, screen.activePlaybackUrl);
+  assert.equal(fetchCount, 0);
+  assert.equal(screen.manifestLoading, false);
+  assert.equal(screen.manifestAudioTracks.length, 0);
+});
+
+test("live progress bar is really hidden and playlist 5xx retries match Android", async () => {
+  const css = await readFile(new URL("../css/components-35.css", import.meta.url), "utf8");
+  assert.match(css, /\.player-progress-shell\.hidden\s*\{\s*display:\s*none;/);
+  const retry = PlayerController.buildHlsConfig({}).playlistLoadPolicy.default.errorRetry;
+  assert.equal(retry.maxNumRetry, 12);
+  assert.equal(retry.maxRetryDelayMs, 5000);
 });

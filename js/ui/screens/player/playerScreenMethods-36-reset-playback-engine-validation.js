@@ -27,6 +27,40 @@ export function createPlayerScreenMethods36() {
       this.postValidationRecoveryValidationActive = false;
       this.postValidationSameEngineRecoveryAttempts = 0;
     },
+    retryCurrentStreamFromStartAfter416() {
+      if (this.hasRetriedCurrentStreamAfter416) {
+        return false;
+      }
+      const retryUrl = String(this.activePlaybackUrl || "").trim();
+      const currentEngine = String(PlayerController.playbackEngine || "").trim();
+      if (!retryUrl || !currentEngine || currentEngine === "none") {
+        return false;
+      }
+
+      // Android retries a 416 once from position 0 and clears the resume
+      // position: the requested range is outside the currently available
+      // window, so replaying the same seek would fail again.
+      this.hasRetriedCurrentStreamAfter416 = true;
+      this.pendingPlaybackRestore = null;
+      this.lastPlaybackErrorAt = 0;
+      this.loadingVisible = true;
+      this.paused = false;
+      this.sourcesError = null;
+      this.updateLoadingVisibility();
+
+      const sourceCandidate = this.getStreamCandidateByUrl(retryUrl) || this.getCurrentStreamCandidate();
+      console.warn("Playback request returned HTTP 416; retrying the current source from the start once", {
+        url: retryUrl,
+        engine: currentEngine
+      });
+      void this.playStreamByUrl(retryUrl, {
+        preservePanel: true,
+        resetSilentAudioState: false,
+        forceEngine: currentEngine,
+        sourceCandidate
+      });
+      return true;
+    },
     resetPostValidationRecoveryValidationWindow() {
       if (!this.postValidationRecoveryValidationActive) {
         return;
@@ -160,6 +194,47 @@ export function createPlayerScreenMethods36() {
         preservePlaybackRecoveryState: true,
         forceEngine: currentEngine,
         sourceCandidate
+      });
+      return true;
+    },
+    // Android's ExoPlayer plays any HTTP server; Samsung AVPlay stalls when a
+    // server (e.g. an add-on proxy) sends lowercase Content-Range and the MP4
+    // index is at the end. The local proxy rewrites the response headers, so
+    // a direct AVPlay start that gets stuck is retried through it once.
+    canRetryTizenAvPlayThroughLocalProxy() {
+      const url = String(this.activePlaybackUrl || "").trim();
+      const route = PlayerController.lastTizenAvPlayRoute;
+      return Boolean(
+        url &&
+        route?.url === url &&
+        !route.viaLocalProxy &&
+        /^https?:\/\//i.test(url) &&
+        !this.hasPresentedPlaybackFrame &&
+        !this.currentEngineFsStream &&
+        this.tizenLocalProxyRequiredUrl !== url
+      );
+    },
+    retryTizenAvPlayThroughLocalProxy() {
+      if (!this.canRetryTizenAvPlayThroughLocalProxy()) {
+        return false;
+      }
+      const retryUrl = String(this.activePlaybackUrl || "").trim();
+      this.tizenLocalProxyRequiredUrl = retryUrl;
+      this.lastPlaybackErrorAt = 0;
+      this.loadingVisible = true;
+      this.paused = false;
+      this.sourcesError = null;
+      this.updateLoadingVisibility();
+      console.warn("Tizen AVPlay could not start the source directly; retrying through the local proxy", {
+        url: retryUrl
+      });
+      void this.playStreamByUrl(retryUrl, {
+        preservePanel: true,
+        preservePlaybackState: true,
+        resetSilentAudioState: false,
+        preservePendingRestore: Boolean(this.pendingPlaybackRestore),
+        forceEngine: PlayerController.getPlatformAvplayEngineName(),
+        sourceCandidate: this.getStreamCandidateByUrl(retryUrl) || this.getCurrentStreamCandidate()
       });
       return true;
     },

@@ -1,8 +1,104 @@
 ## Unreleased
 
+## 1.3.9
+
 ### Improvements & Fixes
 
-- Snap Home camera and detail-rail scrolling on LG webOS while preserving poster animations and image-loading budgets (#1153) (@malkstar)
+- Fixed Nuvio TV not starting on older Samsung TVs (Tizen 5.0 / Chromium 63) after 1.3.8 (@WhiteGiso)
+- Streams that need add-on headers (such as AnimeWorld) now play on Samsung TVs: the local proxy sends the response headers AVPlay expects, so MP4 files with the index at the end no longer stall at startup (@WhiteGiso)
+- When AVPlay cannot start a source directly, for example through an add-on proxy that sends lowercase range headers, Samsung TVs now retry it once through the local proxy instead of waiting a minute and failing, so these streams play like on Android TV (@WhiteGiso)
+- The local playback proxy is now only a fallback on Tizen and webOS: sources that play without the add-on headers open directly from the CDN (@WhiteGiso)
+
+## 1.3.8
+
+### Improvements & Fixes
+
+- Added Collections on Smart TV: browse, create and edit collections and folders with the Android TV layout
+- Added the chapters panel for Matroska and MP4 playback, Android-style episode options with long-press, and HDR/Dolby Vision subtitle styling with matching control dimming
+- Added cross-provider episode mapping for Trakt, MDBList and add-on lists, including anime split-season numbering, so watched state, resume and scrobbles stay aligned
+- Plugin providers now start in most-played order and remember the provider used for a series
+- Aligned post-play, trailer Back behaviour and AutoSync outcome handling with Android TV
+- Updated runtime translations, including Bengali and Croatian
+- Aligned legacy webOS and Tizen stream layouts with Android TV (#1280)
+- Restored the Android TV stream panel size on Tizen (#1277)
+- Hid the unusable compatibility bypass and kept focus visible on older Tizen TVs (#1267)
+- Matched the canonical media server sync envelope and cloud server import (#1274)
+- Aligned Modern sidebar focus states and removed the extra icon circle with Android TV (#1268)
+- Restored Continue Watching artwork blur on Tizen (#1269)
+
+## 1.3.7
+
+### Improvements & Fixes
+
+- Live playback now hides the progress bar, and hls.js retries playlist 5xx responses for about 15 seconds like Android TV instead of ending the stream, so short provider outages no longer stop a channel (#1253, #1262) (@WhiteGiso)
+- Trakt comment cards now open the Android TV-style full-screen reader: spoiler reviews stay hidden until OK reveals them, the D-pad scrolls the review, and left/right moves between comments (#1263) (@WhiteGiso)
+- A live channel whose first segment answers HTTP 416 now restarts once from the beginning without a stale resume position, matching Android TV, instead of falling through to AVPlay/native-HLS and stalling (#1262) (@WhiteGiso)
+- Live channels no longer store a resume position, so reopening one starts at the live edge instead of seeking outside the stream window; the player also keeps the first manifest request on providers that allow a single connection (#1253) (@WhiteGiso)
+- Tizen HLS subtitles no longer lose their second line behind the letterboxed picture: the video player keeps the full player viewport, matching Android TV's subtitle overlay (#1256) (@WhiteGiso)
+- Home vertical navigation now waits for the camera to settle before starting poster artwork work on webOS, avoiding decode bursts during the scroll animation; the Modern sidebar no longer animates its layout width, matching Android TV's transform-only opening (@WhiteGiso)
+
+## 1.3.6
+
+### Improvements & Fixes
+
+- Ambient now shows the loaded slide when Tizen pauses the fade at zero opacity, while keeping the normal fade on engines where it advances (#1172) (@WhiteGiso)
+
+## 1.3.5
+
+### Improvements & Fixes
+
+- Added a first-slide Ambient paint diagnostic (viewport, root, stage, backdrop sizes and computed opacity) for the remaining Tizen black-screen report; no behavior change (#1172) (@WhiteGiso)
+
+## 1.3.4
+
+### Improvements & Fixes
+
+- Added one-per-session Ambient diagnostics for the Tizen black-screen report: start, blocked idle reason, show and first rendered slide, with no behavior change (#1172) (@WhiteGiso)
+
+## 1.3.3
+
+### Improvements & Fixes
+
+- A failing optional Samsung screensaver API can no longer stop Ambient before it opens on older Tizen engines; the AppCommon access is now fully best-effort (#1172) (@WhiteGiso)
+
+## 1.3.2
+
+### Improvements & Fixes
+
+- Ambient images now load inside the document on Samsung Tizen, fixing the remaining black overlay on engines that do not complete detached image loads, with targeted Console diagnostics for catalog and image failures (#1172) (@WhiteGiso)
+
+## 1.3.1
+
+### Improvements & Fixes
+
+- Holding a seek now moves the player bar, time and end time together with the preview on every step, aligned with Android TV (@WhiteGiso)
+- Library posters now render as images so Samsung Tizen paints them correctly (#1209) (@WhiteGiso)
+- Ambient mode now displays images that report zero natural width (#1211) (@WhiteGiso)
+- Smoother post-play mini window on Smart TV: the video plane stays rectangular, the ending movie no longer shows behind the recommendation backdrop during the entrance transition, and the video keeps playing without the extra GPU compositing (@WhiteGiso)
+- Post-play now hides every subtitle renderer (HTML, bitmap, ASS and native webOS/Tizen), aligned with Android TV (@WhiteGiso)
+- Released the webOS startup audio gate after track discovery so the parental guide can appear (@WhiteGiso)
+
+## 1.3.0
+
+### Improvements & Fixes
+
+- Added automatic subtitle synchronization for add-on subtitles on LG webOS and Samsung Tizen, aligned with Android TV AutoSync (#1058) (@WhiteGiso)
+- Added skip intervals derived from Matroska chapters (#1189) (@WhiteGiso)
+- Added Android TV's "Always Backdrop with Logo for Landscape Posters" layout option, synced with the profile (@WhiteGiso)
+- Added Hebrew translations and fixed Hebrew P2P consent line breaks (@haveAnIssue, @WhiteGiso)
+- Media servers now list their streams instead of "No streams found", negotiate native TV formats and recover failed direct play (#1180, #1183) (@jaydeep-pipaliya, @WhiteGiso)
+- Improved Samsung Tizen playback: preferred audio and subtitle labels from MKV metadata, late audio-preference reapply, AVPlay track alignment, locally rendered embedded VobSub subtitles and no header warnings on the playback proxy path (#1127, #1128, #1163, #884, #1093) (@WhiteGiso)
+- Kept ambient mode above the Tizen screensaver and supported Tizen engines without AbortController (#1195, #1174) (@WhiteGiso)
+- Restored animated Home, detail, Search and Discover focus scrolling on LG webOS, aligned with Android TV (@WhiteGiso)
+- Made returning to Home, opening Settings and opening the sidebar faster and smoother on TV (#1186) (@WhiteGiso)
+- Choosing Home from the menu on another screen now lands on Home with the menu closed, aligned with Android TV (@WhiteGiso)
+- Home artwork now loads after long scrolls, and pending or failed posters show the card surface instead of their title as text (@WhiteGiso)
+- Supplied landscape artwork keeps its own branding without a duplicate title overlay (#1178) (@WhiteGiso)
+- The Home hero and detail trailer button now pick the trailer in the TMDB language before falling back to English, aligned with Android TV (@WhiteGiso)
+- Dates, Discover filters and the player clock now follow the app language and its time format (#1166) (@WhiteGiso)
+- Aligned the player pause overlay and the Modern sidebar metrics with Android TV (#1099) (@WhiteGiso)
+- Unified custom poster controls in the layout settings list (#1185) (@WhiteGiso)
+- Settings icons no longer flash their names as text on first open, and expected Tizen PluginService fallbacks no longer appear as Console errors (#1113) (@WhiteGiso)
 
 ## 1.2.10
 

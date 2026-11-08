@@ -1,20 +1,35 @@
 import * as internals from "./homeScreenContext.js";
 import { resetHomeArtworkRescaler } from "../../images/tvPosterRescaler.js";
 
+const HOME_ARTWORK_RELEASE_DELAY_MS = 800;
+
 export function createHomeScreenMethods30() {
   const { ScreenUtils, Platform, getTvRuntimePerformanceProfile } = internals;
 
   return {
-    cleanup() {
-      // Hand every poster back to its original url before the rescaler is
-      // torn down. TV runtimes keep this DOM in the document, so revoking a
-      // blob url a card still points at would break it on the way back.
-      if (getTvRuntimePerformanceProfile().isTvRuntime) {
-        this.releaseAllHomeLazyImages();
+    cancelDeferredHomeArtworkRelease() {
+      if (this.homeArtworkReleaseTimer) {
+        clearTimeout(this.homeArtworkReleaseTimer);
+        this.homeArtworkReleaseTimer = null;
       }
-      // Drop the rescale workers and every blob url they produced. Leaving
-      // them alive would keep the artwork of a screen nobody is looking at.
-      resetHomeArtworkRescaler();
+    },
+    cleanup() {
+      // Release Home artwork just after the next screen has painted: done in
+      // the route keydown it delayed every exit by ~50 ms, and a quick return
+      // to Home now cancels it and keeps the posters (see mount).
+      this.cancelDeferredHomeArtworkRelease();
+      this.homeArtworkReleaseTimer = setTimeout(() => {
+        this.homeArtworkReleaseTimer = null;
+        // Hand every poster back to its original url before the rescaler is
+        // torn down. TV runtimes keep this DOM in the document, so revoking a
+        // blob url a card still points at would break it on the way back.
+        if (getTvRuntimePerformanceProfile().isTvRuntime) {
+          this.releaseAllHomeLazyImages();
+        }
+        // Drop the rescale workers and every blob url they produced. Leaving
+        // them alive would keep the artwork of a screen nobody is looking at.
+        resetHomeArtworkRescaler();
+      }, HOME_ARTWORK_RELEASE_DELAY_MS);
       this.heroMdbListRequest = null;
       if (this.unsubscribeStartupSyncPullCompleted) {
         this.unsubscribeStartupSyncPullCompleted();
@@ -78,6 +93,10 @@ export function createHomeScreenMethods30() {
         cancelAnimationFrame(this.homeLazyImageHydrationRaf);
         this.homeLazyImageHydrationRaf = 0;
       }
+      if (this.homeViewportSettleHydrationTimer) {
+        clearTimeout(this.homeViewportSettleHydrationTimer);
+        this.homeViewportSettleHydrationTimer = null;
+      }
       if (this.homeLazyImageHydrationSettleTimer) {
         clearTimeout(this.homeLazyImageHydrationSettleTimer);
         this.homeLazyImageHydrationSettleTimer = null;
@@ -130,9 +149,9 @@ export function createHomeScreenMethods30() {
         this.container.style.right = "0";
         this.container.style.bottom = "0";
         this.container.style.left = "0";
-        this.container.style.display = "none";
-        this.container.style.visibility = "hidden";
-        this.container.style.pointerEvents = "none";
+        // The home-dom-preserved class hides the layer (content-visibility or
+        // display:none). Inline visibility/pointer-events are inherited, so
+        // toggling them restyled every card on return (~1 s on webOS).
         this.container.classList.add("home-dom-preserved");
         this.homeDomPreserved = true;
       } else {

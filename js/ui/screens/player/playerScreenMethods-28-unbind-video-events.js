@@ -62,6 +62,14 @@ export function createPlayerScreenMethods28() {
           title: t("audio_dialog_title", {}, "Audio")
         });
 
+      if (Array.isArray(this.playerChapters) && this.playerChapters.length > 1 && this.isLivePlayback?.() !== true) {
+        base.push({
+          action: "chapters",
+          label: "≡",
+          title: t("player_chapters", {}, "Chapters")
+        });
+      }
+
       base.push({
         action: "source",
         icon: "assets/icons/ic_player_source.svg",
@@ -312,6 +320,7 @@ export function createPlayerScreenMethods28() {
       this.container?.classList.toggle("post-play-trailer-consumed", postPlayTrailerConsumed);
       this.container?.classList.toggle("post-play-returning", Boolean(postPlayState.hasReturnedToPlayer));
       this.syncPostPlayPlayerSurface(postPlayState);
+      this.setPostPlaySubtitleOutputHidden(postPlayVisible);
       this.syncPlayerActionOverlayOffset();
     },
     cancelPostPlayPlayerSurfaceAnimation() {

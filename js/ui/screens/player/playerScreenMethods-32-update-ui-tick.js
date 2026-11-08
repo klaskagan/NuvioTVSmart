@@ -4,11 +4,22 @@ import { MediaServerScrobbleService } from "../../../data/mediaserver/mediaServe
 /* eslint-disable no-unused-vars */
 import * as internals from "./playerScreenContext.js";
 
+// Playback progress arrives from several sources at once (native timeupdate at
+// ~4 Hz, the AVPlay time callback plus its 1 s poll, the screen heartbeat and
+// progress events). Each used to run a full UI tick. Coalesce them to one tick
+// per interval; the heartbeat still guarantees a tick every second. Issue #1208.
+const UI_TICK_MIN_INTERVAL_MS = 250;
+
+function uiTickNow() {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
 export function createPlayerScreenMethods32() {
   const {
     renderPlayerImageBadgeChip,
     getTrackLanguageLabel,
     PlayerController,
+    PlayerSettingsStore,
     deltaMsForKeyRepeat,
     calculateRemainingPlaybackMilliseconds,
     t,
@@ -19,10 +30,51 @@ export function createPlayerScreenMethods32() {
   } = internals;
 
   return {
+    requestUiTick() {
+      const now = uiTickNow();
+      const elapsed = now - Number(this.lastUiTickAt || 0);
+      if (!this.lastUiTickAt || elapsed >= UI_TICK_MIN_INTERVAL_MS) {
+        this.updateUiTick();
+        return;
+      }
+      if (this.uiTickPendingTimer != null) {
+        return;
+      }
+      // Trailing edge: the newest position is never dropped, only delayed.
+      this.uiTickPendingTimer = setTimeout(
+        () => {
+          this.uiTickPendingTimer = null;
+          this.updateUiTick();
+        },
+        Math.max(0, UI_TICK_MIN_INTERVAL_MS - elapsed)
+      );
+    },
+    cancelPendingUiTick() {
+      if (this.uiTickPendingTimer != null) {
+        clearTimeout(this.uiTickPendingTimer);
+        this.uiTickPendingTimer = null;
+      }
+    },
     updateUiTick() {
+      this.lastUiTickAt = uiTickNow();
+      this.cancelPendingUiTick?.();
       if (this.playerRouteActive) MediaServerScrobbleService.update(this.buildScrobbleContext());
       if (this.isExternalFrameMode()) {
         return;
+      }
+      this.syncHdrPresentation?.();
+      this.syncChaptersPanelHighlight?.();
+      this.syncStartupGateAndParentalGuide?.();
+      if (
+        PlayerSettingsStore.get().skipIntroEnabled &&
+        !this.chapterSkipIntervalsLoaded &&
+        !this.chaptersFetchInFlight &&
+        this.hasPresentedPlaybackFrame &&
+        Number(this.getPlaybackDurationSeconds() || 0) > 0 &&
+        Date.now() >= Number(this.chapterSkipIntervalsRetryAt || 0)
+      ) {
+        this.chapterSkipIntervalsRetryAt = Date.now() + 5000;
+        void this.refreshChapterSkipIntervals?.();
       }
       syncPlayerPlaybackBadges(this, PlayerController, renderPlayerImageBadgeChip, getTrackLanguageLabel);
       const isLivePlayback = this.isLivePlayback();
@@ -42,11 +94,6 @@ export function createPlayerScreenMethods32() {
       const displayCurrent = this.getPlaybackDisplayCurrentSeconds();
       const duration = this.getPlaybackDisplayDurationSeconds();
       this.evaluatePostPlayRecommendation();
-      const effectiveProgressSeconds =
-        this.controlsVisible && this.controlFocusZone === "progress" && this.seekPreviewSeconds != null
-          ? Number(this.seekPreviewSeconds)
-          : displayCurrent;
-      const progress = duration > 0 ? clamp(effectiveProgressSeconds / duration, 0, 1) : 0;
       const uiRefs = this.uiRefs || {};
       const uiState = this.lastUiTickState || (this.lastUiTickState = {});
       const progressBuffered = uiRefs.progressBuffered;
@@ -64,14 +111,7 @@ export function createPlayerScreenMethods32() {
           uiState.bufferedVisible = bufferedVisible;
         }
       }
-      const progressFill = uiRefs.progressFill;
-      if (progressFill) {
-        const nextWidth = `${Math.round(progress * 10000) / 100}%`;
-        if (uiState.progressWidth !== nextWidth) {
-          progressFill.style.width = nextWidth;
-          uiState.progressWidth = nextWidth;
-        }
-      }
+      this.renderProgressPosition();
       this.syncSkipIntroButtonProgress();
       this.renderSkipIntroButton();
       this.syncPlayerOverlayLayoutState();
@@ -95,13 +135,15 @@ export function createPlayerScreenMethods32() {
         const playbackSpeed = this.getPlaybackSpeed();
         // Keep this clock based on the full media duration. Outro intervals are
         // handled independently by skip/autoplay, as they are on Android TV.
-        const remainingMs = isLivePlayback ? null : calculateRemainingPlaybackMilliseconds(displayCurrent, duration, playbackSpeed);
+        // Android derives this from the timeline position, which is the preview target while seeking.
+        const endsAtPosition = this.seekPreviewSeconds != null ? Number(this.seekPreviewSeconds) : displayCurrent;
+        const remainingMs = isLivePlayback ? null : calculateRemainingPlaybackMilliseconds(endsAtPosition, duration, playbackSpeed);
         const nextEndsAtMinuteBucket = remainingMs == null ? -1 : Math.floor((Date.now() + remainingMs) / 60000);
         endsAt.classList.toggle("hidden", isLivePlayback);
         if (uiState.endsAtMinuteBucket !== nextEndsAtMinuteBucket) {
           const nextEndsAtText = isLivePlayback
             ? ""
-            : t("player_ends_at", [formatEndsAt(displayCurrent, duration, this.webOsClockLocaleInfo, playbackSpeed)], "Ends at %1$s");
+            : t("player_ends_at", [formatEndsAt(endsAtPosition, duration, this.webOsClockLocaleInfo, playbackSpeed)], "Ends at %1$s");
           endsAt.textContent = nextEndsAtText;
           uiState.endsAtText = nextEndsAtText;
           uiState.endsAtMinuteBucket = nextEndsAtMinuteBucket;
@@ -120,17 +162,10 @@ export function createPlayerScreenMethods32() {
       }
 
       const timeLabel = uiRefs.timeLabel;
-      if (timeLabel) {
-        const nextTimeLabel = isLivePlayback
-          ? t("player_live_watched", [formatTime(watchedMs / 1000)], "LIVE  %1$s")
-          : `${formatTime(effectiveProgressSeconds)} / ${formatTime(duration)}`;
+      if (timeLabel && isLivePlayback) {
+        const nextTimeLabel = t("player_live_watched", [formatTime(watchedMs / 1000)], "LIVE  %1$s");
         if (uiState.timeLabelText !== nextTimeLabel) {
           timeLabel.textContent = nextTimeLabel;
-          if (!isLivePlayback && uiRefs.progressShell) {
-            uiRefs.progressShell.setAttribute("aria-valuemax", String(Math.max(0, duration)));
-            uiRefs.progressShell.setAttribute("aria-valuenow", String(clamp(effectiveProgressSeconds, 0, Math.max(0, duration))));
-            uiRefs.progressShell.setAttribute("aria-valuetext", nextTimeLabel);
-          }
           uiState.timeLabelText = nextTimeLabel;
         }
       }
@@ -143,7 +178,43 @@ export function createPlayerScreenMethods32() {
         this.renderSeekOverlay();
       }
     },
+    renderProgressPosition() {
+      // Android shows a pending preview seek wherever the timeline is drawn
+      // (pendingPreviewSeekPosition ?: position) and redraws it on every step.
+      // The UI tick runs once a second, so a held seek must redraw here too or
+      // the bar and time trail the preview.
+      if (this.isLivePlayback()) {
+        return;
+      }
+      const uiRefs = this.uiRefs || {};
+      const uiState = this.lastUiTickState || (this.lastUiTickState = {});
+      const duration = this.getPlaybackDisplayDurationSeconds();
+      const position = this.seekPreviewSeconds != null ? Number(this.seekPreviewSeconds) : this.getPlaybackDisplayCurrentSeconds();
+      const progress = duration > 0 ? clamp(position / duration, 0, 1) : 0;
+      const progressFill = uiRefs.progressFill;
+      if (progressFill) {
+        const nextWidth = `${Math.round(progress * 10000) / 100}%`;
+        if (uiState.progressWidth !== nextWidth) {
+          progressFill.style.width = nextWidth;
+          uiState.progressWidth = nextWidth;
+        }
+      }
+      const timeLabel = uiRefs.timeLabel;
+      if (timeLabel) {
+        const nextTimeLabel = `${formatTime(position)} / ${formatTime(duration)}`;
+        if (uiState.timeLabelText !== nextTimeLabel) {
+          timeLabel.textContent = nextTimeLabel;
+          if (uiRefs.progressShell) {
+            uiRefs.progressShell.setAttribute("aria-valuemax", String(Math.max(0, duration)));
+            uiRefs.progressShell.setAttribute("aria-valuenow", String(clamp(position, 0, Math.max(0, duration))));
+            uiRefs.progressShell.setAttribute("aria-valuetext", nextTimeLabel);
+          }
+          uiState.timeLabelText = nextTimeLabel;
+        }
+      }
+    },
     renderSeekOverlay() {
+      this.renderProgressPosition();
       const overlay = this.uiRefs?.seekOverlay;
       const directionNode = this.uiRefs?.seekDirection;
       const previewNode = this.uiRefs?.seekPreview;

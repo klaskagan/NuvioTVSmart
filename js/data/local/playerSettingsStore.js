@@ -9,6 +9,12 @@ import {
   SUBTITLE_TEXT_OPACITY_DEFAULT,
   normalizeSubtitleTextOpacity
 } from "../../core/player/subtitleTextOpacity.js";
+import { AUTO_SYNC_TOLERANCE_OPTIONS_MS } from "../../core/player/subtitleAutoSyncEngine.js";
+import {
+  HDR_BRIGHTNESS_DEFAULT,
+  normalizeHdrBrightness,
+  normalizeHdrTextColor
+} from "../../core/player/hdrSubtitleStyle.js";
 
 const KEY = "playerSettings";
 
@@ -56,7 +62,14 @@ const DEFAULTS = {
     preferredLanguage: "en",
     secondaryPreferredLanguage: "off",
     useForcedSubtitles: false,
-    showOnlyPreferredLanguages: false
+    showOnlyPreferredLanguages: false,
+    autoSyncEnabled: false,
+    autoSyncToleranceMs: 0,
+    autoSyncThorough: true,
+    hdrStyleEnabled: false,
+    hdrTextColor: "#FFFFFF",
+    hdrBrightness: HDR_BRIGHTNESS_DEFAULT,
+    hdrDimPlayerControls: false
   },
   audioAmplificationDb: 0,
   persistAudioAmplification: false,
@@ -378,7 +391,18 @@ export function normalizePlayerSettings(settings = {}) {
       preferredLanguage,
       secondaryPreferredLanguage,
       useForcedSubtitles,
-      showOnlyPreferredLanguages: Boolean(subtitleStyle.showOnlyPreferredLanguages)
+      showOnlyPreferredLanguages: Boolean(subtitleStyle.showOnlyPreferredLanguages),
+      autoSyncEnabled: subtitleStyle.autoSyncEnabled === true,
+      autoSyncToleranceMs: AUTO_SYNC_TOLERANCE_OPTIONS_MS.includes(
+        Math.trunc(Number(subtitleStyle.autoSyncToleranceMs))
+      )
+        ? Math.trunc(Number(subtitleStyle.autoSyncToleranceMs))
+        : 0,
+      autoSyncThorough: subtitleStyle.autoSyncThorough !== false,
+      hdrStyleEnabled: subtitleStyle.hdrStyleEnabled === true,
+      hdrTextColor: normalizeHdrTextColor(subtitleStyle.hdrTextColor),
+      hdrBrightness: normalizeHdrBrightness(subtitleStyle.hdrBrightness),
+      hdrDimPlayerControls: subtitleStyle.hdrDimPlayerControls === true
     }
   };
 }

@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import * as internals from "./playerScreenContext.js";
+import { HDR_BRIGHTNESS_STEP, normalizeHdrBrightness } from "../../../core/player/hdrSubtitleStyle.js";
 
 export function createPlayerScreenMethods53() {
   const {
@@ -20,7 +21,7 @@ export function createPlayerScreenMethods53() {
     SUBTITLE_VERTICAL_OFFSET_STEP,
     getEmbeddedSubtitleSupportState,
     isTizenEmbeddedTextSubtitleFallbackTrack,
-    canUseWebOsBitmapSubtitles,
+    canUseEmbeddedBitmapSubtitles,
     clamp,
     normalizeSubtitleFontSize
   } = internals;
@@ -74,6 +75,8 @@ export function createPlayerScreenMethods53() {
         style.verticalOffset = normalizeSubtitleVerticalOffset(
           Number(style.verticalOffset ?? SUBTITLE_VERTICAL_OFFSET_DEFAULT) + delta * SUBTITLE_VERTICAL_OFFSET_STEP
         );
+      } else if (controlId === "hdrBrightness") {
+        style.hdrBrightness = normalizeHdrBrightness(Number(style.hdrBrightness ?? 40) + delta * HDR_BRIGHTNESS_STEP);
       } else if (controlId === "reset") {
         const defaults = PlayerSettingsStore.getDefaults().subtitleStyle;
         this.subtitleDelayMs = 0;
@@ -87,7 +90,9 @@ export function createPlayerScreenMethods53() {
           outlineEnabled: defaults.outlineEnabled,
           outlineColor: defaults.outlineColor,
           verticalOffset: defaults.verticalOffset,
-          verticalOffsetContract: defaults.verticalOffsetContract
+          verticalOffsetContract: defaults.verticalOffsetContract,
+          hdrTextColor: defaults.hdrTextColor,
+          hdrBrightness: defaults.hdrBrightness
         };
       }
       if ((controlId === "delay" || controlId === "resetDelay" || controlId === "reset") && this.isAssAddonSubtitleActive()) {
@@ -246,11 +251,15 @@ export function createPlayerScreenMethods53() {
       this.renderSubtitleDialog();
       return true;
     },
-    applyBitmapEmbeddedSubtitleTrack(embeddedTrack, targetTrackIndex) {
+    applyBitmapEmbeddedSubtitleTrack(embeddedTrack, targetTrackIndex, options = {}) {
+      const isTizenBitmap = Environment.isTizen();
+      // shortcut: Tizen software bitmap rendering is limited to VobSub because
+      // AVPlay already draws PGS; widen it only if a firmware fails PGS too.
       if (
         !embeddedTrack?.bitmapSubtitle ||
+        (isTizenBitmap && embeddedTrack?.bitmapSubtitleFormat !== "vobsub") ||
         getEmbeddedSubtitleSupportState(embeddedTrack).supported === false ||
-        !canUseWebOsBitmapSubtitles()
+        !canUseEmbeddedBitmapSubtitles()
       ) {
         return false;
       }
@@ -258,7 +267,20 @@ export function createPlayerScreenMethods53() {
       if (!Number.isFinite(sourceTrackId) || sourceTrackId <= 0) {
         return false;
       }
+      const avplayTrackIndex = Number(options.avplayTrackIndex);
       const previousSubtitleSelectionKey = this.getActiveSubtitleSelectionKey();
+      if (isTizenBitmap) {
+        if (
+          !Number.isFinite(avplayTrackIndex) ||
+          avplayTrackIndex < 0 ||
+          typeof PlayerController.setAvPlaySubtitleTrack !== "function" ||
+          !PlayerController.setAvPlaySubtitleTrack(avplayTrackIndex, { renderMode: "html", keepSilent: true })
+        ) {
+          return false;
+        }
+        // Keep AVPlay silent even when the selection is deferred until PLAYING.
+        PlayerController.applyAvPlaySubtitleRenderMode?.("html");
+      }
       this.clearEmbeddedSubtitleCueRefreshTimers();
       if (this.externalTrackNodes.length) {
         this.clearMountedExternalSubtitleTracks();
@@ -266,10 +288,15 @@ export function createPlayerScreenMethods53() {
       this.clearWebOsEmbeddedTextSubtitleOverlay({ dispose: true });
       this.clearHtmlSubtitleOverlay();
       this.clearBitmapSubtitleOverlay({ dispose: true });
-      PlayerController.setWebOsEmbeddedSubtitleTrack?.(-1);
+      if (isTizenBitmap) {
+        this.selectedSubtitleTrackIndex = avplayTrackIndex;
+        this.selectedEmbeddedSubtitleTrackIndex = -1;
+      } else {
+        PlayerController.setWebOsEmbeddedSubtitleTrack?.(-1);
+        this.selectedEmbeddedSubtitleTrackIndex = Number.isFinite(targetTrackIndex) ? targetTrackIndex : -1;
+        this.selectedSubtitleTrackIndex = -1;
+      }
       this.bitmapSubtitleTrack = embeddedTrack;
-      this.selectedEmbeddedSubtitleTrackIndex = Number.isFinite(targetTrackIndex) ? targetTrackIndex : -1;
-      this.selectedSubtitleTrackIndex = -1;
       this.selectedAddonSubtitleId = null;
       this.selectedManifestSubtitleTrackId = null;
       this.resetSubtitleDelayAfterSelectionChange(previousSubtitleSelectionKey);

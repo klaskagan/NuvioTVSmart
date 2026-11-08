@@ -46,6 +46,20 @@ export function renderLayoutMarkup(model) {
             ${
               isModernLayout
                 ? this.renderToggleRow({
+                    focusKey: "layout:alwaysShowLandscapeClearlogo",
+                    title: t("layout_always_show_landscape_clearlogo", {}, "Always Backdrop with Logo for Landscape Posters"),
+                    subtitle: t(
+                      "layout_always_show_landscape_clearlogo_sub",
+                      {},
+                      "Ignore landscape poster from addon and use backdrop with clearlogo overlay instead."
+                    ),
+                    checked: Boolean(model.layout.alwaysShowLandscapeClearlogo)
+                  })
+                : ""
+            }
+            ${
+              isModernLayout
+                ? this.renderToggleRow({
                     focusKey: "layout:modernHeroFullScreenBackdrop",
                     title: t("settings.layout.fullscreenHeroBackdrop.title"),
                     subtitle: t("settings.layout.fullscreenHeroBackdrop.subtitle"),
@@ -78,8 +92,8 @@ export function renderLayoutMarkup(model) {
                 !isModernLayout && model.layout.heroSectionEnabled
                   ? this.renderActionRow({
                       focusKey: "layout:heroCatalogs",
-                      title: t("layout_hero_catalog", {}, "Hero catalogs"),
-                      subtitle: t("layout_hero_catalog_sub", {}, "Choose catalogs used by the Hero section."),
+                      title: t("layout_hero_catalogs", {}, "Hero Catalogs"),
+                      subtitle: t("layout_hero_catalogs_sub", {}, "Select one or more catalogs for hero content."),
                       value: String(model.layout.heroCatalogKeys?.length || 0)
                     })
                   : ""
@@ -124,7 +138,7 @@ export function renderLayoutMarkup(model) {
               subtitle: t("settings.layout.heroSection.subtitle"),
               checked: Boolean(model.layout.heroSectionEnabled)
             })}
-            ${model.layout.heroSectionEnabled ? this.renderActionRow({ focusKey: "layout:heroCatalogs", title: t("layout_hero_catalog", {}, "Hero catalogs"), subtitle: t("layout_hero_catalog_sub", {}, "Choose catalogs used by the Hero section"), value: model.layout.heroCatalogKeys?.length ? String(model.layout.heroCatalogKeys.length) : t("common_all", {}, "All") }) : ""}
+            ${model.layout.heroSectionEnabled ? this.renderActionRow({ focusKey: "layout:heroCatalogs", title: t("layout_hero_catalogs", {}, "Hero Catalogs"), subtitle: t("layout_hero_catalogs_sub", {}, "Select one or more catalogs for hero content."), value: model.layout.heroCatalogKeys?.length ? String(model.layout.heroCatalogKeys.length) : t("common_all", {}, "All") }) : ""}
             `
                 : ""
             }
@@ -274,6 +288,16 @@ export function renderLayoutMarkup(model) {
               checked: Boolean(model.layout.detailPageTrailerButtonEnabled)
             })}
             ${this.renderToggleRow({
+              focusKey: "layout:detail:trailerBackground",
+              title: t("layout_trailer_play_in_background", {}, "Play in Background"),
+              subtitle: t(
+                "layout_trailer_play_in_background_sub",
+                {},
+                "Play the trailer in place of the backdrop while the page stays visible."
+              ),
+              checked: model.layout.trailerPlayInBackground === true
+            })}
+            ${this.renderToggleRow({
               focusKey: "layout:detail:preferExternalMeta",
               title: t("settings.layout.preferExternalMeta.title"),
               subtitle: t("settings.layout.preferExternalMeta.subtitle"),
@@ -380,7 +404,6 @@ export function renderLayoutMarkup(model) {
 
   return `
           ${this.renderSectionHeader(SECTION_META.find((item) => item.id === "layout"))}
-          <div class="settings-group-card"><div class="settings-stack">${renderCustomPosterSettings.call(this)}</div></div>
           <div class="settings-group-card settings-group-card-fill">
             <div class="settings-stack">
               ${this.renderCollapsibleRow({
@@ -419,6 +442,13 @@ export function renderLayoutMarkup(model) {
                 bodyHtml: focusedPosterBody
               })}
               ${this.renderCollapsibleRow({ focusKey: "layout:toggle:cardAppearance", title: t("settings_card_depth_title", {}, "Card appearance"), subtitle: t("settings_card_depth_description", {}, "Size, corners and depth surfaces"), expanded: Boolean(expanded.cardAppearance), bodyHtml: cardAppearanceBody })}
+              ${this.renderCollapsibleRow({
+                focusKey: "layout:toggle:customPosters",
+                title: t("layout_custom_poster_title", {}, "Custom Poster Source"),
+                subtitle: t("layout_section_custom_poster_desc", {}, "Use artwork from an external poster service."),
+                expanded: Boolean(expanded.customPosters),
+                bodyHtml: `<div class="settings-stack">${renderCustomPosterSettings.call(this)}</div>`
+              })}
             </div>
           </div>
         `;

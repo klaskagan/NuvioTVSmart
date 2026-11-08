@@ -37,6 +37,7 @@ export function createPlayerScreenMethods01() {
 
   return {
     async mount(params = {}, navigationContext = {}) {
+      PlayerController.currentPlaybackIsLive = false;
       streamRepository.setLocalPluginSearchPaused(false);
       this.container = document.getElementById("player");
       this.container.style.display = "block";
@@ -222,6 +223,9 @@ export function createPlayerScreenMethods01() {
             maxWaitMs: prioritizeWebOsRemoteMkvPlayback ? WEBOS_REMOTE_MKV_AUDIO_GATE_MAX_WAIT_MS : 0
           });
         }
+        if (!this.currentEngineFsStream) {
+          this.prefetchTizenEmbeddedAudioTracks(initialStreamUrl, sourceCandidate);
+        }
         const playbackStartPromise = this.startPlayerControllerPlayback(
           this.activePlaybackUrl,
           this.buildPlaybackContext(sourceCandidate),
@@ -233,7 +237,18 @@ export function createPlayerScreenMethods01() {
             return;
           }
         }
-        this.loadManifestTrackDataForCurrentStream(this.activePlaybackUrl);
+        if (prioritizeWebOsRemoteMkvPlayback) {
+          this.loadManifestTrackDataForCurrentStream(this.activePlaybackUrl);
+        } else {
+          // The player must issue the first manifest request: some live
+          // providers limit concurrent connections and reject a probe.
+          const loadTrackDataAfterPlayback = () => {
+            if (this.isActiveMountToken(mountToken) && this.activePlaybackUrl === initialStreamUrl) {
+              this.loadManifestTrackDataForCurrentStream(this.activePlaybackUrl);
+            }
+          };
+          void playbackStartPromise.then(loadTrackDataAfterPlayback, loadTrackDataAfterPlayback);
+        }
         this.startTrackDiscoveryWindow({
           durationMs: prioritizeWebOsRemoteMkvPlayback ? WEBOS_REMOTE_MKV_AUDIO_GATE_MAX_WAIT_MS : 7000
         });
@@ -257,7 +272,7 @@ export function createPlayerScreenMethods01() {
       if (!this.isExternalFrameMode()) {
         this.loadSubtitles();
         this.syncTrackState();
-        this.tickTimer = setInterval(() => this.updateUiTick(), 1000);
+        this.tickTimer = setInterval(() => this.requestUiTick(), 1000);
         this.startSkipIntervalCheckTimer();
         this.endedHandler = () => {
           if (PlayerController.isLivePlaybackItemType?.()) {

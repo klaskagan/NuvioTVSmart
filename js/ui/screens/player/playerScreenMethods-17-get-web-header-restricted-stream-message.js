@@ -19,6 +19,12 @@ export function createPlayerScreenMethods17() {
       return extractPlaybackHttpStatus(PlayerController.getLastHlsErrorDetail?.());
     },
     getWebHeaderRestrictedStreamMessage(streamCandidate = this.getCurrentStreamCandidate()) {
+      // Tizen forwards declared request headers through the local playback proxy
+      // (and AVPlay handles Cookie/User-Agent itself), so this is not a device
+      // limitation there. Android likewise never blocks these sources.
+      if (Environment.isTizen()) {
+        return "";
+      }
       const candidate = streamCandidate || {};
       const raw = candidate?.raw || {};
       const rawBehaviorHints = raw?.behaviorHints || {};
@@ -199,6 +205,7 @@ export function createPlayerScreenMethods17() {
       this.subtitleDelayOverlayVisible = false;
       this.subtitleTimingDialogVisible = false;
       this.resetSubtitleAutoSyncState();
+      this.resetAutomaticSubtitleSyncState({ resetStartupKey: true });
       this.audioDialogVisible = false;
       this.speedDialogVisible = false;
       this.episodePanelVisible = false;

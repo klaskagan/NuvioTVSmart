@@ -28,6 +28,7 @@ const DEFAULTS = {
   catalogAddonNameEnabled: true,
   catalogTypeSuffixEnabled: true,
   modernLandscapePostersEnabled: false,
+  alwaysShowLandscapeClearlogo: false,
   modernHeroFullScreenBackdropEnabled: false,
   classicFocusGradientEnabled: false,
   focusedPosterBackdropExpandEnabled: true,
@@ -48,6 +49,7 @@ const DEFAULTS = {
   cardDepthCastEnabled: true,
   cardDepthTrailersEnabled: true,
   detailPageTrailerButtonEnabled: true,
+  trailerPlayInBackground: false,
   preferExternalMetaAddonDetail: true,
   blurUnwatchedEpisodes: false,
   randomEpisodeEnabled: false,
@@ -118,6 +120,7 @@ function normalizeLayoutPreferences(value = {}) {
       )
     ],
     modernLandscapePostersEnabled: Boolean(merged.modernLandscapePostersEnabled),
+    alwaysShowLandscapeClearlogo: Boolean(merged.alwaysShowLandscapeClearlogo),
     modernHeroFullScreenBackdropEnabled: Boolean(merged.modernHeroFullScreenBackdropEnabled),
     focusedPosterBackdropExpandEnabled: Boolean(merged.focusedPosterBackdropExpandEnabled),
     focusedPosterBackdropExpandDelaySeconds: Math.max(
@@ -160,6 +163,7 @@ function normalizeLayoutPreferences(value = {}) {
     preferExternalMetaAddonDetail: merged.preferExternalMetaAddonDetail !== false,
     showFullReleaseDate: merged.showFullReleaseDate !== false,
     detailPageTrailerButtonEnabled: Boolean(merged.detailPageTrailerButtonEnabled),
+    trailerPlayInBackground: merged.trailerPlayInBackground === true,
     blurUnwatchedEpisodes: Boolean(merged.blurUnwatchedEpisodes),
     randomEpisodeEnabled: Boolean(merged.randomEpisodeEnabled),
     useEpisodeThumbnailsInCw: merged.useEpisodeThumbnailsInCw !== false,
@@ -195,17 +199,39 @@ const store = createProfileScopedStore({
   normalize: normalizeLayoutPreferences
 });
 
+// get() runs on every preference read; rewriting an unchanged root attribute
+// still invalidates every [data-card-depth] card style in Chromium.
+function setRootDataset(root, key, value) {
+  if (root.dataset[key] !== value) {
+    root.dataset[key] = value;
+  }
+}
+
 function applyCardDepthPresentation(settings) {
   const root = globalThis?.document?.documentElement;
   if (!root) return;
-  root.dataset.cardDepth = settings.cardDepthEnabled ? "true" : "false";
-  root.dataset.cardDepthPosters = settings.cardDepthPostersEnabled !== false ? "true" : "false";
-  root.dataset.cardDepthContinueWatching =
-    settings.cardDepthContinueWatchingEnabled !== false ? "true" : "false";
-  root.dataset.cardDepthEpisodes =
-    settings.cardDepthEpisodeCardsEnabled !== false ? "true" : "false";
-  root.dataset.cardDepthCast = settings.cardDepthCastEnabled !== false ? "true" : "false";
-  root.dataset.cardDepthTrailers = settings.cardDepthTrailersEnabled !== false ? "true" : "false";
+  setRootDataset(root, "cardDepth", settings.cardDepthEnabled ? "true" : "false");
+  setRootDataset(
+    root,
+    "cardDepthPosters",
+    settings.cardDepthPostersEnabled !== false ? "true" : "false"
+  );
+  setRootDataset(
+    root,
+    "cardDepthContinueWatching",
+    settings.cardDepthContinueWatchingEnabled !== false ? "true" : "false"
+  );
+  setRootDataset(
+    root,
+    "cardDepthEpisodes",
+    settings.cardDepthEpisodeCardsEnabled !== false ? "true" : "false"
+  );
+  setRootDataset(root, "cardDepthCast", settings.cardDepthCastEnabled !== false ? "true" : "false");
+  setRootDataset(
+    root,
+    "cardDepthTrailers",
+    settings.cardDepthTrailersEnabled !== false ? "true" : "false"
+  );
   const edgeStrength = settings.cardDepthEdgeStrength / 100;
   const edgeCoverage = settings.cardDepthEdgeCoverage / 100;
   root.style.setProperty("--card-depth-edge", String(edgeStrength));

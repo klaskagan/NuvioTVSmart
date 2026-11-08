@@ -69,6 +69,7 @@ export function createSettingsScreenMethods01() {
               <div class="settings-sidebar-frame">
                 <aside class="settings-sidebar" data-settings-nav></aside>
                 ${settingsScrollIndicatorMarkup("vertical")}
+                ${settingsScrollIndicatorMarkup("horizontal")}
               </div>
               <div class="settings-content-frame">
                 <section class="settings-content" data-settings-content></section>
@@ -158,7 +159,7 @@ export function createSettingsScreenMethods01() {
           this.sidebarProfile = sidebarProfile;
         }
         this.model = model;
-        await this.render({ refreshModel: false });
+        await this.render({ refreshModel: false, skipUnchangedContent: true });
       })().catch((error) => {
         if (this.isMounted && mountToken === this.settingsMountToken && Router.getCurrent() === "settings") {
           console.warn("Settings background model refresh failed", error);

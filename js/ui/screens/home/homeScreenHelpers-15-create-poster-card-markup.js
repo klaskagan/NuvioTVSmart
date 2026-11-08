@@ -247,7 +247,7 @@ export function createPosterCardMarkup(
         ? `<div class="home-collection-title-overlay" dir="auto">${escapeHtml(collectionDisplayTitle)}</div>`
         : "";
     const contentMarkup = visualSrc
-      ? `<img class="content-poster" ${buildLazyImageAttributes(visualSrc, { defer: deferPosterImages })} alt="${escapeAttribute(collectionItem.name || collectionItem.heroTitle || collectionItem.collectionTitle || "collection")}" />`
+      ? `<img class="content-poster" ${buildLazyImageAttributes(visualSrc, { defer: deferPosterImages })} alt="" />`
       : collectionItem.coverEmoji
         ? `<div class="home-collection-emoji" aria-hidden="true">${escapeHtml(collectionItem.coverEmoji)}</div>`
         : '<div class="content-poster placeholder"></div>';
@@ -291,14 +291,18 @@ export function createPosterCardMarkup(
     `;
   }
   const isLoading = Boolean(item?.isLoading);
+  const cardSettings = posterSettings || LayoutPreferences.get();
   const normalized = customPosterForItem(
     normalizeCatalogItem(item, itemType),
     Router.getCurrent() === "folderDetail" || rowData?.rowKind === "collection" ? "collections" : "home",
     layoutMode === "modern" && preferLandscapePoster ? "landscape" : "poster",
-    posterSettings
+    cardSettings
   );
   const subtitle = buildPosterSubtitle(normalized, layoutMode);
-  const preferredLandscapePosterSrc = firstNonEmpty(normalized.landscapePoster);
+  // Android's "always backdrop with logo" ignores supplied landscape artwork and
+  // draws the backdrop with the clearlogo/title overlay instead.
+  const ignoreLandscapePoster = layoutMode === "modern" && Boolean(cardSettings.alwaysShowLandscapeClearlogo);
+  const preferredLandscapePosterSrc = ignoreLandscapePoster ? "" : firstNonEmpty(normalized.landscapePoster);
   const useLandscapePoster = layoutMode === "modern" && preferLandscapePoster;
   const landscapeVisualSrc = firstNonEmpty(
     preferredLandscapePosterSrc,
@@ -360,7 +364,7 @@ export function createPosterCardMarkup(
       <div class="home-poster-frame">
         ${
           !isLoading && posterSrc
-            ? `<img class="content-poster" ${buildLazyImageAttributes(posterSrc, { defer: deferPosterImages })} alt="${escapeAttribute(normalized.name || "content")}" data-original-poster="${escapeAttribute((useLandscapePoster ? normalized.rawLandscapePosterUrl : normalized.rawPosterUrl) || "")}" />`
+            ? `<img class="content-poster" ${buildLazyImageAttributes(posterSrc, { defer: deferPosterImages })} alt="" data-original-poster="${escapeAttribute((useLandscapePoster ? normalized.rawLandscapePosterUrl : normalized.rawPosterUrl) || "")}" />`
             : '<div class="content-poster placeholder"></div>'
         }
         ${

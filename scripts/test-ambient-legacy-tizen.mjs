@@ -15,6 +15,17 @@ for (const nativeAbort of [false, true]) {
   const element = () => ({
     children: [],
     style: { setProperty() {} },
+    classList: {
+      values: new Set(),
+      add(value) {
+        this.values.add(value);
+      },
+      contains(value) {
+        return this.values.has(value);
+      }
+    },
+    isConnected: true,
+    getBoundingClientRect: () => ({ width: 1920, height: 1080 }),
     setAttribute() {},
     appendChild(child) {
       this.children.push(child);
@@ -32,7 +43,19 @@ for (const nativeAbort of [false, true]) {
     Image: class {
       constructor() {
         this.naturalWidth = 1920;
+        this.attributes = {};
+        this.isConnected = true;
+        this.getBoundingClientRect = () => ({ width: 1920, height: 1080 });
         images.push(this);
+      }
+      setAttribute(name, value) {
+        this.attributes[name] = value;
+      }
+      removeAttribute(name) {
+        delete this.attributes[name];
+      }
+      remove() {
+        this.removed = true;
       }
       set src(value) {
         this.url = value;
@@ -47,6 +70,9 @@ for (const nativeAbort of [false, true]) {
       timers.delete(id);
     },
     performance: { now: () => 1000 },
+    console: { warn() {} },
+    getComputedStyle: () => ({ opacity: "0" }),
+    URL,
     document: {
       hidden: false,
       body: element(),
@@ -56,7 +82,8 @@ for (const nativeAbort of [false, true]) {
       dispatchEvent() {}
     },
     CustomEvent: Event,
-    Platform: { isWebOS: () => false },
+    Platform: { isWebOS: () => false, isTizen: () => false },
+    TizenScreenSaver: { block() {}, unblock() {} },
     isAmbientTrailerPlaying: () => false,
     Router: { getCurrent: () => "home", getCurrentScreen: () => screen },
     ProfileManager: { getActiveProfileId: () => "1" },
@@ -81,14 +108,33 @@ for (const nativeAbort of [false, true]) {
   assert.equal(ambient.slides.length, 1);
   ambient.show();
   assert.equal(images.length, 2, "load backdrop and logo concurrently without AbortController");
+  assert.ok(images[0].attributes.style, "stage the backdrop in the document while loading");
+  assert.ok(
+    context.document.body.children.includes(images[0]),
+    "attach the staging image to the document body"
+  );
+  // Legacy TV engines can report zero intrinsic width after a successful load.
+  images[0].naturalWidth = 0;
   images[0].onload();
   images[1].onerror();
+  assert.equal(images[0].attributes.style, undefined, "remove the staging style after load");
+  assert.equal(images[0].removed, true, "remove the staging image after load");
+  assert.equal(images[1].removed, true, "remove the staging image after error");
   await flush();
   assert.equal(ambient.root.children.length, 1, "render first slide");
   const copy = ambient.root.children[0].children[2];
   assert.equal(copy.children[0].text, "Title", "missing logo uses title");
   assert.equal(copy.children[1].text, "Drama");
   assert.ok([...timers.values()].some(({ delay }) => delay === 13250));
+  const paintCheck = [...timers.entries()].find(([, timer]) => timer.delay === 500);
+  assert.ok(paintCheck, "schedule the Ambient paint fallback check");
+  timers.delete(paintCheck[0]);
+  paintCheck[1].fn();
+  assert.equal(
+    ambient.root.children[0].classList.contains("ambient-static"),
+    true,
+    "show the loaded slide when the fade stays at zero opacity"
+  );
   ambient.dismiss();
   assert.equal(timers.size, 0, "dismiss clears slideshow and image timers");
 

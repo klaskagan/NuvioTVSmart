@@ -1,7 +1,8 @@
+const INITIAL_HEADER_BYTES = 64 * 1024;
 const MAX_HEADER_BYTES = 1024 * 1024;
 const PROBE_TIMEOUT_MS = 3000;
 
-function readElement(bytes, offset, limit) {
+export function readElement(bytes, offset, limit) {
   const readVint = (start, isId) => {
     const first = bytes[start];
     if (!first) throw new Error("Invalid EBML integer");
@@ -27,7 +28,7 @@ function readElement(bytes, offset, limit) {
   return { id: id.value, start, end: size.unknown ? Infinity : start + size.value };
 }
 
-function children(bytes, start, end) {
+export function children(bytes, start, end) {
   const elements = [];
   while (start < end) {
     const element = readElement(bytes, start, end);
@@ -66,19 +67,21 @@ function parseTrackEntries(bytes, element) {
       ids.add(id);
       return {
         id,
-        type: type === 2 ? "audio" : "other",
+        type: type === 2 ? "audio" : type === 17 ? "subtitle" : "other",
         containerStreamIndex,
         codec: string(0x86),
         name: string(0x536e),
-        // Missing language stays unknown; do not turn untagged tracks into English guesses.
-        language: string(0x22b59d) || string(0x22b59c)
+        // Matroska defaults a missing Language to English, as Media3 and
+        // mkvmerge-based muxers do. An explicit und still stays unknown.
+        language: string(0x22b59d) || string(0x22b59c) || "eng",
+        forced: integer(0x55aa) === 1
       };
     })
-    .filter((track) => track.type === "audio");
+    .filter((track) => track.type === "audio" || track.type === "subtitle");
 }
 
 // Read one bounded header and, when indexed, one bounded Tracks range.
-export function parseMatroskaAudioTracks(bytes) {
+export function parseMatroskaTracks(bytes) {
   try {
     const header = readElement(bytes, 0, bytes.length);
     if (header.id === 0x1654ae6b)
@@ -131,10 +134,11 @@ export function matroskaTracksOffset(bytes) {
           const fields = children(bytes, seek.start, seek.end);
           const integer = (id) => {
             const field = fields.find((entry) => entry.id === id);
-            if (!field || field.end - field.start > 6) return null;
-            return bytes
+            if (!field || field.end - field.start > 8) return null;
+            const value = bytes
               .subarray(field.start, field.end)
-              .reduce((value, byte) => value * 256 + byte, 0);
+              .reduce((total, byte) => total * 256 + byte, 0);
+            return Number.isSafeInteger(value) ? value : null;
           };
           if (integer(0x53ab) !== 0x1654ae6b) continue;
           const relative = integer(0x53ac);
@@ -155,52 +159,70 @@ export function matroskaTracksOffset(bytes) {
   return null;
 }
 
-export async function fetchMatroskaAudioTracks(url) {
+export async function fetchMatroskaTracks(url) {
   if (!/^https?:\/\//i.test(url) || typeof AbortController !== "function") return [];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-  const readRange = async (offset) => {
+  const readRange = async (offset, size) => {
     let reader;
     try {
       const response = await fetch(url, {
-        headers: { Range: `bytes=${offset}-${offset + MAX_HEADER_BYTES - 1}` },
+        headers: { Range: `bytes=${offset}-${offset + size - 1}` },
         signal: controller.signal,
         credentials: "omit"
       });
       const range = response.headers.get("content-range");
       if (
         response.status !== 206 ||
-        (offset > 0 && !range) ||
         (range && !new RegExp(`^bytes ${offset}-\\d+/\\d+$`, "i").test(range)) ||
         !response.body?.getReader
       )
         return null;
       reader = response.body.getReader();
-      const bytes = new Uint8Array(MAX_HEADER_BYTES);
+      const bytes = new Uint8Array(size);
       let length = 0;
       while (true) {
         const { done, value } = await reader.read();
         if (done) return bytes.subarray(0, length);
-        if (length + value.length > MAX_HEADER_BYTES) return null;
+        if (length + value.length > size) return null;
         bytes.set(value, length);
         length += value.length;
-        if (length === MAX_HEADER_BYTES) return bytes;
+        if (length === size) return bytes;
       }
     } finally {
       if (reader) void reader.cancel().catch(() => {});
     }
   };
   try {
-    const header = await readRange(0);
-    if (!header) return [];
-    const tracks = parseMatroskaAudioTracks(header);
+    const header = await readRange(0, INITIAL_HEADER_BYTES);
+    // Skip the larger read for containers that cannot carry Matroska tracks.
+    if (
+      !header ||
+      header.length < 4 ||
+      header[0] !== 0x1a ||
+      header[1] !== 0x45 ||
+      header[2] !== 0xdf ||
+      header[3] !== 0xa3
+    ) {
+      return [];
+    }
+    const tracks = parseMatroskaTracks(header);
     if (tracks.length) return tracks;
     const offset = matroskaTracksOffset(header);
-    if (offset == null) return [];
-    const indexed = await readRange(offset);
-    // The advertised position must contain Tracks, never another Segment or index.
-    if (!indexed || readElement(indexed, 0, indexed.length).id !== 0x1654ae6b) return [];
-    return parseMatroskaAudioTracks(indexed);
+    if (offset != null) {
+      const indexed = await readRange(offset, INITIAL_HEADER_BYTES);
+      // The advertised position must contain Tracks, never another Segment or index.
+      if (!indexed || readElement(indexed, 0, indexed.length).id !== 0x1654ae6b) return [];
+      return parseMatroskaTracks(indexed);
+    }
+    // Large attachments can push Tracks past the first chunk.
+    if (header.length < INITIAL_HEADER_BYTES) return [];
+    const tail = await readRange(INITIAL_HEADER_BYTES, MAX_HEADER_BYTES - INITIAL_HEADER_BYTES);
+    if (!tail) return [];
+    const combined = new Uint8Array(header.length + tail.length);
+    combined.set(header);
+    combined.set(tail, header.length);
+    return parseMatroskaTracks(combined);
   } catch (_) {
     return [];
   } finally {

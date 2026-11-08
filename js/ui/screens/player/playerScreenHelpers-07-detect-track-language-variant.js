@@ -238,7 +238,12 @@ export function detectTrackLanguageVariant(track = {}, language = getTrackLangua
   if (!normalizedLanguage) {
     return "";
   }
-  if (normalizedLanguage === "pt-br" || normalizedLanguage === "es-419") {
+  if (
+    normalizedLanguage === "pt-br" ||
+    normalizedLanguage === "es-419" ||
+    normalizedLanguage === "zh-ca" ||
+    normalizedLanguage === "sr-me"
+  ) {
     return normalizedLanguage;
   }
   const baseLanguage = normalizedLanguage.split("-")[0];
@@ -351,7 +356,8 @@ export function formatClock(date = new Date(), webOsLocaleInfo = null) {
   const hour12 = resolveSystemHour12({
     tizenApi: typeof tizen !== "undefined" ? tizen : null,
     webOsLocaleInfo,
-    intlApi: typeof Intl !== "undefined" ? Intl : null
+    intlApi: typeof Intl !== "undefined" ? Intl : null,
+    locale
   });
   const localeKey = `${String(locale || "__default__")}:${String(hour12)}`;
   const options = buildClockFormatOptions(hour12);

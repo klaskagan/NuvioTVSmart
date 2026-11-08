@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 import * as internals from "./settingsScreenContext.js";
+import { HomeCatalogSettingsSyncService } from "../../../core/profile/homeCatalogSettingsSyncService.js";
 
 export function registerLayoutActions(model) {
   const { HomeCatalogStore, LayoutPreferences, HOME_LAYOUT_OPTIONS, t } = internals;
@@ -20,6 +21,9 @@ export function registerLayoutActions(model) {
   });
   this.actionMap.set("layout:toggle:cardAppearance", () => {
     this.toggleExpandedSection("layout", "cardAppearance");
+  });
+  this.actionMap.set("layout:toggle:customPosters", () => {
+    this.toggleExpandedSection("layout", "customPosters");
   });
   HOME_LAYOUT_OPTIONS.forEach((option) => {
     this.actionMap.set(`layout:layout:${option.id}`, () => {
@@ -48,7 +52,7 @@ export function registerLayoutActions(model) {
         label: catalogSettings.customTitles?.[key] || key.split("::").pop() || key
       }));
     this.openMultiChoiceDialog({
-      title: t("layout_hero_catalog", {}, "Hero catalogs"),
+      title: t("layout_hero_catalogs", {}, "Hero Catalogs"),
       options,
       selectedIds: model.layout.heroCatalogKeys || [],
       returnFocusKey: "layout:heroCatalogs",
@@ -128,6 +132,9 @@ export function registerLayoutActions(model) {
     LayoutPreferences.set({
       hideUnreleasedContent: !LayoutPreferences.get().hideUnreleasedContent
     });
+    // Android pushes this home-catalog setting immediately, so a later pull
+    // cannot restore the previous value.
+    HomeCatalogSettingsSyncService.triggerPush();
   });
   this.actionMap.set("layout:useEpisodeThumbnailsInCw", () => {
     LayoutPreferences.set({
@@ -199,6 +206,11 @@ export function registerLayoutActions(model) {
       modernLandscapePostersEnabled: !LayoutPreferences.get().modernLandscapePostersEnabled
     });
   });
+  this.actionMap.set("layout:alwaysShowLandscapeClearlogo", () => {
+    LayoutPreferences.set({
+      alwaysShowLandscapeClearlogo: !LayoutPreferences.get().alwaysShowLandscapeClearlogo
+    });
+  });
   this.actionMap.set("layout:modernHeroFullScreenBackdrop", () => {
     LayoutPreferences.set({
       modernHeroFullScreenBackdropEnabled: !LayoutPreferences.get().modernHeroFullScreenBackdropEnabled
@@ -256,6 +268,11 @@ export function registerLayoutActions(model) {
   this.actionMap.set("layout:detail:trailerButton", () => {
     LayoutPreferences.set({
       detailPageTrailerButtonEnabled: !LayoutPreferences.get().detailPageTrailerButtonEnabled
+    });
+  });
+  this.actionMap.set("layout:detail:trailerBackground", () => {
+    LayoutPreferences.set({
+      trailerPlayInBackground: !LayoutPreferences.get().trailerPlayInBackground
     });
   });
   this.actionMap.set("layout:detail:shuffle", () =>
